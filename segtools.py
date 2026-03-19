@@ -417,6 +417,99 @@ def input_float(prompt, default):
 
 
 # ──────────────────────────────────────────────
+# 기능 8: 내부 구멍 채우기
+# ──────────────────────────────────────────────
+
+def func_fill_holes(data, **kwargs):
+    """라벨 내부 구멍을 채우기 (외곽 형태 유지)."""
+    target = input_choice("  대상 선택", ["1: 신장(label 1)", "2: 종양(label 2)", "3: 신장+종양 장기 전체"])
+
+    if target == "3":
+        # 신장+종양 합쳐서 fill → 채워진 부분은 신장으로
+        kidney_mask = (data == 1)
+        tumor_mask = (data == 2)
+        organ_mask = (kidney_mask | tumor_mask)
+        before = int(np.sum(organ_mask))
+
+        filled = ndimage.binary_fill_holes(organ_mask).astype(np.uint8)
+        new_voxels = (filled == 1) & ~organ_mask
+
+        result = data.copy()
+        result[new_voxels] = 1  # 채워진 부분은 신장으로
+        added = int(np.sum(new_voxels))
+        print(f"  장기 내부 구멍 채움: +{added:,} voxels (신장으로 라벨링)")
+    else:
+        label = int(target)
+        name = {1: "신장", 2: "종양"}[label]
+        mask = (data == label)
+        before = int(np.sum(mask))
+
+        filled = ndimage.binary_fill_holes(mask).astype(np.uint8)
+        new_voxels = (filled == 1) & ~mask
+
+        result = data.copy()
+        result[new_voxels] = label
+        added = int(np.sum(new_voxels))
+        print(f"  {name} 내부 구멍 채움: +{added:,} voxels")
+
+    return result
+
+
+# ──────────────────────────────────────────────
+# 기능 9: 고립 신장 → 종양 재라벨링
+# ──────────────────────────────────────────────
+
+def func_relabel_isolated_kidney(data, **kwargs):
+    """종양 인접 고립 신장 component를 종양으로 재라벨링."""
+    kidney_mask = (data == 1)
+    tumor_mask = (data == 2)
+
+    total_kidney = int(np.sum(kidney_mask))
+    if total_kidney == 0:
+        print("  신장 라벨 없음")
+        return data
+
+    labeled, n_comp = ndimage.label(kidney_mask)
+    if n_comp <= 2:
+        print(f"  신장 component {n_comp}개 — 고립 없음")
+        return data
+
+    sizes = ndimage.sum(kidney_mask, labeled, range(1, n_comp + 1))
+    sorted_indices = np.argsort(sizes)[::-1]
+
+    # 상위 2개 = 좌우 신장 본체
+    main_labels = set()
+    for idx in sorted_indices[:2]:
+        main_labels.add(idx + 1)
+
+    # 종양 인접 마스크
+    struct = ndimage.generate_binary_structure(3, 1)
+    tumor_adj = ndimage.binary_dilation(tumor_mask, structure=struct).astype(bool)
+
+    result = data.copy()
+    relabeled_count = 0
+    relabeled_voxels = 0
+
+    for i in range(1, n_comp + 1):
+        if i in main_labels:
+            continue
+        comp_mask = (labeled == i)
+        comp_size = int(np.sum(comp_mask))
+
+        if np.any(comp_mask & tumor_adj):
+            result[comp_mask] = 2
+            relabeled_count += 1
+            relabeled_voxels += comp_size
+
+    if relabeled_voxels > 0:
+        print(f"  고립 신장 {relabeled_count}개 → 종양으로 재라벨링 (+{relabeled_voxels:,} voxels)")
+    else:
+        print(f"  종양 인접 고립 신장 없음")
+
+    return result
+
+
+# ──────────────────────────────────────────────
 # 메인 루프
 # ──────────────────────────────────────────────
 
@@ -428,6 +521,8 @@ FUNCTIONS = {
     "5": ("종양 smoothing", func_smooth_tumor),
     "6": ("신장+종양 장기 외곽 smoothing", func_smooth_kidney),
     "7": ("Intensity 기반 경계 확장", func_expand_boundary),
+    "8": ("내부 구멍 채우기", func_fill_holes),
+    "9": ("고립 신장 → 종양 재라벨링", func_relabel_isolated_kidney),
     "r": ("롤백 (직전 상태로 되돌리기)", None),  # 특수 처리
 }
 
