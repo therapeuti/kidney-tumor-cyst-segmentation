@@ -15,6 +15,7 @@ import shutil
 import nibabel as nib
 import numpy as np
 from scipy import ndimage
+from scipy.spatial import ConvexHull, Delaunay
 
 
 # ──────────────────────────────────────────────
@@ -74,13 +75,14 @@ def save_result(path, data, img):
 rollback_history = {}
 
 
+
 def print_label_info(data, ct_data=None):
     """현재 라벨 상태 출력."""
     labels = np.unique(data)
     print(f"\n  현재 라벨 상태:")
     for label in labels:
         count = int(np.sum(data == label))
-        name = {0: "배경", 1: "신장", 2: "종양"}.get(int(label), f"라벨{label}")
+        name = {0: "배경", 1: "신장", 2: "종양", 3: "물혹"}.get(int(label), f"라벨{label}")
         info = f"    {name}(label {int(label)}): {count:>12,} voxels"
         if ct_data is not None and label > 0:
             vals = ct_data[data == label]
@@ -384,12 +386,29 @@ def func_analyze(data, ct_data=None, **kwargs):
 # 입력 헬퍼
 # ──────────────────────────────────────────────
 
+class CancelOperation(Exception):
+    """현재 기능 취소."""
+
+class RollbackRequest(Exception):
+    """직전 상태로 롤백 요청."""
+
+
+def _check_special(val):
+    """q/r 입력 시 예외 발생."""
+    if val.lower() == "q":
+        raise CancelOperation()
+    if val.lower() == "r":
+        raise RollbackRequest()
+
+
 def input_choice(prompt, options):
     """선택지 입력."""
     for opt in options:
         print(f"    {opt}")
+    print(f"    q: 취소  r: 롤백")
     while True:
         val = input(f"  {prompt}: ").strip()
+        _check_special(val)
         valid = [opt.split(":")[0].strip() for opt in options]
         if val in valid:
             return val
@@ -397,7 +416,8 @@ def input_choice(prompt, options):
 
 
 def input_int(prompt, default):
-    val = input(f"  {prompt}: ").strip()
+    val = input(f"  {prompt} (q:취소 r:롤백): ").strip()
+    _check_special(val)
     if val == "":
         return default
     try:
@@ -407,7 +427,8 @@ def input_int(prompt, default):
 
 
 def input_float(prompt, default):
-    val = input(f"  {prompt}: ").strip()
+    val = input(f"  {prompt} (q:취소 r:롤백): ").strip()
+    _check_special(val)
     if val == "":
         return default
     try:
@@ -422,7 +443,7 @@ def input_float(prompt, default):
 
 def func_fill_holes(data, **kwargs):
     """라벨 내부 구멍을 채우기 (외곽 형태 유지)."""
-    target = input_choice("  대상 선택", ["1: 신장(label 1)", "2: 종양(label 2)", "3: 신장+종양 장기 전체"])
+    target = input_choice("  대상 선택", ["1: 신장(label 1)", "2: 종양(label 2)", "3: 신장+종양 장기 전체", "4: 물혹(label 3)"])
 
     if target == "3":
         # 신장+종양 합쳐서 fill → 채워진 부분은 신장으로
@@ -440,7 +461,9 @@ def func_fill_holes(data, **kwargs):
         print(f"  장기 내부 구멍 채움: +{added:,} voxels (신장으로 라벨링)")
     else:
         label = int(target)
-        name = {1: "신장", 2: "종양"}[label]
+        name = {1: "신장", 2: "종양", 4: "물혹"}[label]
+        if label == 4:
+            label = 3
         mask = (data == label)
         before = int(np.sum(mask))
 
@@ -510,6 +533,244 @@ def func_relabel_isolated_kidney(data, **kwargs):
 
 
 # ──────────────────────────────────────────────
+# 기능 10: 볼록 껍질 기반 물혹 라벨링
+# ──────────────────────────────────────────────
+
+def func_label_cyst(data, ct_data=None, zooms=None, **kwargs):
+    """시드 전체 복셀 → 3D 볼록 껍질 → 내부 전체 채움.
+
+    신장(label 1) 내부로만 제한하며, 종양(label 2)은 침범하지 않음.
+    """
+
+    seed_mask = (data == 3)
+    n_seed = int(np.sum(seed_mask))
+    if n_seed == 0:
+        print("  label 3 시드가 없습니다.")
+        print("  → 여러 평면(axial/sagittal/coronal)에서 물혹 영역을 label 3으로 칠해주세요.")
+        return data
+
+    organ_mask = (data == 1) | (data == 3)
+    if int(np.sum(organ_mask)) == 0:
+        print("  신장 라벨 없음 — 실행 불가")
+        return data
+
+    # ── 1. 시드 전체 복셀 → 껍질 꼭짓점 ──
+    coords = np.argwhere(seed_mask)
+    print(f"  껍질 꼭짓점: {len(coords):,} voxels")
+
+    # ── 2. 3D 볼록 껍질 생성 ──
+    try:
+        hull = ConvexHull(coords)
+        delaunay = Delaunay(coords[hull.vertices])
+    except Exception as e:
+        print(f"  볼록 껍질 계산 실패: {e}")
+        print("  → 시드를 여러 평면에 걸쳐 더 넓게 칠해주세요.")
+        return data
+
+    # ── 3. 껍질 내부 전체 채움 ──
+    margin = 1
+    mins = np.maximum(coords.min(axis=0) - margin, 0)
+    maxs = np.minimum(coords.max(axis=0) + margin + 1, data.shape)
+
+    grid = np.mgrid[mins[0]:maxs[0], mins[1]:maxs[1], mins[2]:maxs[2]]
+    test_points = grid.reshape(3, -1).T
+
+    print(f"  내부 판정 중... ({len(test_points):,} voxels)")
+    inside = delaunay.find_simplex(test_points) >= 0
+
+    cyst_mask = np.zeros(data.shape, dtype=bool)
+    cyst_mask[test_points[inside, 0], test_points[inside, 1], test_points[inside, 2]] = True
+
+    # 시드는 무조건 포함
+    cyst_mask = cyst_mask | seed_mask
+
+    # ── 4. 최종 제약: 신장 내부, 종양 보호 ──
+    cyst_mask = cyst_mask & organ_mask & ~(data == 2)
+    cyst_mask = cyst_mask | seed_mask
+
+    total = int(np.sum(cyst_mask))
+    print(f"  결과: {n_seed:,} → {total:,} voxels (+{total - n_seed:,})")
+
+    result = data.copy()
+    result[cyst_mask] = 3
+    return result
+
+
+# ──────────────────────────────────────────────
+# 기능 11: 경계 계단 메꿈
+# ──────────────────────────────────────────────
+
+def func_fill_staircase(data, **kwargs):
+    """신장+종양 경계의 계단식 울퉁불퉁함을 메꿈."""
+    kidney_mask = (data == 1)
+    tumor_mask = (data == 2)
+    organ_mask = (kidney_mask | tumor_mask)
+
+    before = int(np.sum(organ_mask))
+    if before == 0:
+        print("  신장/종양 라벨 없음")
+        return data
+
+    iterations = input_int("  Closing 반복 (기본 1)", default=1)
+
+    # 26-connectivity: 대각 방향 포함하여 계단 틈새를 채움
+    struct = ndimage.generate_binary_structure(3, 3)
+    closed = ndimage.binary_closing(organ_mask, structure=struct, iterations=iterations)
+
+    # 기존 복셀은 유지, 새로 채워진 부분만 신장으로 추가
+    new_voxels = closed & ~organ_mask
+    result = data.copy()
+    result[new_voxels] = 1
+
+    added = int(np.sum(new_voxels))
+    print(f"  경계 메꿈: +{added:,} voxels (신장으로 라벨링)")
+    return result
+
+
+# ──────────────────────────────────────────────
+# 기능 12: 신장 돌출부 제거
+# ──────────────────────────────────────────────
+
+def func_remove_protrusion(data, **kwargs):
+    """신장 경계에서 얇게 돌출된 부분을 제거."""
+    kidney_mask = (data == 1)
+    tumor_mask = (data == 2)
+
+    before = int(np.sum(kidney_mask))
+    if before == 0:
+        print("  신장 라벨 없음")
+        return data
+
+    iterations = input_int("  Opening 반복 (기본 1)", default=1)
+
+    # Opening: erosion → dilation — 얇은 돌출부가 제거됨
+    struct = ndimage.generate_binary_structure(3, 1)
+    opened = ndimage.binary_opening(kidney_mask, structure=struct, iterations=iterations)
+
+    # 종양에 인접한 신장은 보호 (종양 주변 1복셀)
+    tumor_adj = ndimage.binary_dilation(tumor_mask, structure=struct)
+    protected = kidney_mask & tumor_adj
+    opened = opened | protected
+
+    removed_mask = kidney_mask & ~opened
+    removed = int(np.sum(removed_mask))
+
+    result = data.copy()
+    result[removed_mask] = 0
+
+    print(f"  돌출부 제거: -{removed:,} voxels (신장 {before:,} → {before - removed:,})")
+    return result
+
+
+# ──────────────────────────────────────────────
+# 기능 13: 물혹 smoothing
+# ──────────────────────────────────────────────
+
+def func_smooth_cyst(data, zooms=None, **kwargs):
+    """물혹(label 3) 경계를 스무스하게 정리."""
+    cyst_mask = (data == 3)
+    kidney_mask = (data == 1)
+    before = int(np.sum(cyst_mask))
+
+    if before == 0:
+        print("  물혹 라벨 없음")
+        return data
+
+    sigma = input_float("  Gaussian sigma mm (기본 1.0)", default=1.0)
+    close_iter = input_int("  Closing 반복 (기본 2)", default=2)
+    open_iter = input_int("  Opening 반복 (기본 1)", default=1)
+
+    # 물혹이 존재할 수 있는 영역: 기존 신장 + 물혹
+    allowed = kidney_mask | cyst_mask
+
+    mask = cyst_mask.astype(np.float64)
+    struct = ndimage.generate_binary_structure(3, 1)
+
+    if close_iter > 0:
+        mask = ndimage.binary_closing(mask, structure=struct, iterations=close_iter).astype(np.float64)
+    if open_iter > 0:
+        mask = ndimage.binary_opening(mask, structure=struct, iterations=open_iter).astype(np.float64)
+
+    if zooms is not None:
+        sigma_voxels = [sigma / float(z) for z in zooms]
+    else:
+        sigma_voxels = sigma
+
+    smoothed = ndimage.gaussian_filter(mask, sigma=sigma_voxels)
+    mask_final = (smoothed >= 0.5) & allowed
+
+    # 내부 구멍 채우기
+    mask_final = ndimage.binary_fill_holes(mask_final) & allowed
+
+    result = data.copy()
+    # 기존 물혹 → 신장으로 되돌린 뒤, smoothed 물혹 적용
+    result[cyst_mask] = 1
+    result[mask_final] = 3
+
+    after = int(np.sum(result == 3))
+    before_s = surface_ratio(cyst_mask.astype(np.uint8))
+    after_s = surface_ratio((result == 3).astype(np.uint8))
+    print(f"  Voxels: {before:,} → {after:,} ({(after - before) / max(before, 1) * 100:+.1f}%)")
+    print(f"  Surface: {before_s:.1f}% → {after_s:.1f}%")
+
+    return result
+
+
+# ──────────────────────────────────────────────
+# 기능 14: 물혹 경계 HU 트리밍
+# ──────────────────────────────────────────────
+
+def func_trim_cyst_boundary(data, ct_data=None, **kwargs):
+    """물혹 경계에서 HU 범위 밖 복셀을 바깥부터 반복 깎아냄."""
+    if ct_data is None:
+        print("  CT 이미지 없음 — 실행 불가")
+        return data
+
+    cyst_mask = (data == 3)
+    before = int(np.sum(cyst_mask))
+    if before == 0:
+        print("  물혹 라벨 없음")
+        return data
+
+    cyst_vals = ct_data[cyst_mask]
+    cyst_mean = float(np.mean(cyst_vals))
+    cyst_std = float(np.std(cyst_vals))
+    print(f"  물혹: {before:,} voxels, intensity {cyst_mean:.1f} ± {cyst_std:.1f} HU")
+
+    tolerance = input_float(
+        f"  허용 HU 범위 (평균 ± X, 기본 {max(cyst_std * 2, 15):.0f})",
+        default=round(max(cyst_std * 2, 15)))
+    max_iter = input_int("  최대 반복 (기본 50)", default=50)
+
+    hu_lo = cyst_mean - tolerance
+    hu_hi = cyst_mean + tolerance
+    print(f"  HU 범위: {hu_lo:.0f} ~ {hu_hi:.0f}")
+
+    hu_bad = (ct_data < hu_lo) | (ct_data > hu_hi)
+    struct = ndimage.generate_binary_structure(3, 1)
+    trimmed = cyst_mask.copy()
+
+    for i in range(max_iter):
+        # 현재 마스크의 표면 복셀
+        eroded = ndimage.binary_erosion(trimmed, structure=struct)
+        surface = trimmed & ~eroded
+        # 표면 중 HU 범위 밖 복셀 제거
+        to_remove = surface & hu_bad
+        removed = int(np.sum(to_remove))
+        if removed == 0:
+            print(f"  {i + 1}회 반복 후 완료")
+            break
+        trimmed = trimmed & ~to_remove
+
+    after = int(np.sum(trimmed))
+    print(f"  트리밍: {before:,} → {after:,} (−{before - after:,} voxels)")
+
+    result = data.copy()
+    result[cyst_mask & ~trimmed] = 1  # 깎인 부분은 신장으로
+    return result
+
+
+# ──────────────────────────────────────────────
 # 메인 루프
 # ──────────────────────────────────────────────
 
@@ -523,6 +784,11 @@ FUNCTIONS = {
     "7": ("Intensity 기반 경계 확장", func_expand_boundary),
     "8": ("내부 구멍 채우기", func_fill_holes),
     "9": ("고립 신장 → 종양 재라벨링", func_relabel_isolated_kidney),
+    "10": ("물혹 라벨링 — 볼록 껍질 기반", func_label_cyst),
+    "11": ("경계 계단 메꿈", func_fill_staircase),
+    "12": ("신장 돌출부 제거", func_remove_protrusion),
+    "13": ("물혹 smoothing", func_smooth_cyst),
+    "14": ("물혹 경계 HU 트리밍", func_trim_cyst_boundary),
     "r": ("롤백 (직전 상태로 되돌리기)", None),  # 특수 처리
 }
 
@@ -555,17 +821,17 @@ def main():
         for p in sorted(phases.keys()):
             ct_status = "CT있음" if phases[p]["img"] else "CT없음"
             print(f"  {p}: {os.path.basename(phases[p]['seg'])} ({ct_status})")
-        print(f"  a: 모든 phase에 동일 작업 실행")
+        print(f"  all: 모든 phase에 동일 작업 실행")
 
-        phase_input = input("\n  Phase: ").strip().upper()
-        if phase_input in ("Q", "QUIT", "EXIT"):
+        phase_input = input("\n  Phase: ").strip()
+        if phase_input.upper() in ("Q", "QUIT", "EXIT"):
             print("종료.")
             break
 
-        if phase_input == "A":
+        if phase_input.lower() == "all":
             selected_phases = sorted(phases.keys())
-        elif phase_input in phases:
-            selected_phases = [phase_input]
+        elif phase_input.upper() in phases:
+            selected_phases = [phase_input.upper()]
         else:
             print("  → 유효한 phase를 입력하세요")
             continue
@@ -630,7 +896,22 @@ def main():
                 ct_data = np.asanyarray(ct_img.dataobj).astype(np.float32)
 
             # 실행
-            result = func(data, ct_data=ct_data, zooms=zooms)
+            try:
+                result = func(data, ct_data=ct_data, zooms=zooms)
+            except CancelOperation:
+                print("\n  취소됨.")
+                continue
+            except RollbackRequest:
+                # 롤백 실행
+                if phase not in rollback_history or len(rollback_history[phase]) == 0:
+                    print(f"\n  [{phase} phase] 롤백 히스토리 없음")
+                    continue
+                prev_data, prev_desc, prev_img = rollback_history[phase][-1]
+                print(f"\n  [{phase} phase] 롤백: '{prev_desc}' 이전 상태로 되돌리기")
+                save_result(seg_path, prev_data, prev_img)
+                rollback_history[phase].pop()
+                print(f"  남은 히스토리: {len(rollback_history[phase])}단계")
+                continue
 
             # 변경 확인
             if np.array_equal(data, result):
@@ -650,6 +931,29 @@ def main():
 
             history_depth = len(rollback_history[phase])
             print(f"  (롤백 가능: {history_depth}단계)")
+
+            # 다중 phase 실행 시 phase별 확인
+            if len(selected_phases) > 1:
+                while True:
+                    next_input = input("  다음? (enter:계속 / r:이 phase 롤백 / q:나머지 건너뛰기): ").strip().lower()
+                    if next_input == "":
+                        break
+                    elif next_input == "q":
+                        break
+                    elif next_input == "r":
+                        if phase in rollback_history and len(rollback_history[phase]) > 0:
+                            prev_data, prev_desc, prev_img = rollback_history[phase][-1]
+                            print(f"  [{phase} phase] 롤백: '{prev_desc}' 이전 상태로 되돌리기")
+                            save_result(seg_path, prev_data, prev_img)
+                            rollback_history[phase].pop()
+                            print(f"  남은 히스토리: {len(rollback_history[phase])}단계")
+                        else:
+                            print(f"  [{phase} phase] 롤백 히스토리 없음")
+                        break
+                    else:
+                        print("    → enter / r / q 중 하나를 입력하세요")
+                if next_input == "q":
+                    break
 
 
 if __name__ == "__main__":
