@@ -265,7 +265,8 @@ def func_smooth_kidney(data, zooms=None, **kwargs):
     open_iter = input_int("  Opening 반복 (기본 2)", default=2)
     keep_n = input_int("  유지할 component 수 (기본 2)", default=2)
 
-    organ_mask = (kidney_mask | tumor_mask).astype(np.uint8)
+    cyst_mask = (data == 3)
+    organ_mask = (kidney_mask | tumor_mask | cyst_mask).astype(np.uint8)
 
     # 상위 keep_n개 component 유지
     labeled, n_comp = ndimage.label(organ_mask)
@@ -298,13 +299,16 @@ def func_smooth_kidney(data, zooms=None, **kwargs):
     result = data.copy()
     result[kidney_mask] = 0
     result[tumor_mask] = 0
+    result[cyst_mask] = 0
     final_tumor = tumor_mask & (smoothed_organ == 1)
-    final_kidney = (smoothed_organ == 1) & ~final_tumor
+    final_cyst = cyst_mask & (smoothed_organ == 1)
+    final_kidney = (smoothed_organ == 1) & ~final_tumor & ~final_cyst
     result[final_kidney] = 1
     result[final_tumor] = 2
+    result[final_cyst] = 3
 
     after_kidney = int(np.sum(result == 1))
-    before_s = surface_ratio((kidney_mask | tumor_mask).astype(np.uint8))
+    before_s = surface_ratio(organ_mask)
     after_s = surface_ratio((smoothed_organ == 1).astype(np.uint8))
     print(f"  신장 Voxels: {before_kidney:,} -> {after_kidney:,} ({(after_kidney-before_kidney)/max(before_kidney,1)*100:+.1f}%)")
     print(f"  장기 외곽 Surface: {before_s:.1f}% -> {after_s:.1f}%")
@@ -453,7 +457,7 @@ def func_fill_holes(data, **kwargs):
         before = int(np.sum(organ_mask))
 
         filled = ndimage.binary_fill_holes(organ_mask).astype(np.uint8)
-        new_voxels = (filled == 1) & ~organ_mask
+        new_voxels = (filled == 1) & ~organ_mask & (data != 3)  # 물혹 보호
 
         result = data.copy()
         result[new_voxels] = 1  # 채워진 부분은 신장으로
@@ -600,7 +604,7 @@ def func_label_cyst(data, ct_data=None, zooms=None, **kwargs):
 # 기능 11: 경계 계단 메꿈
 # ──────────────────────────────────────────────
 
-def func_fill_staircase(data, **kwargs):
+def func_fill_staircase(data, ct_data=None, **kwargs):
     """신장+종양 경계의 계단식 울퉁불퉁함을 메꿈."""
     kidney_mask = (data == 1)
     tumor_mask = (data == 2)
@@ -612,18 +616,22 @@ def func_fill_staircase(data, **kwargs):
         return data
 
     iterations = input_int("  Closing 반복 (기본 1)", default=1)
+    threshold = input_float("  최소 intensity HU (기본 120)", default=120.0)
 
     # 26-connectivity: 대각 방향 포함하여 계단 틈새를 채움
     struct = ndimage.generate_binary_structure(3, 3)
     closed = ndimage.binary_closing(organ_mask, structure=struct, iterations=iterations)
 
-    # 기존 복셀은 유지, 새로 채워진 부분만 신장으로 추가
-    new_voxels = closed & ~organ_mask
+    # 기존 복셀은 유지, 새로 채워진 부분만 신장으로 추가 (종양/물혹 보호)
+    new_voxels = closed & ~organ_mask & (data != 2) & (data != 3)
+    # HU 기준값 이상인 복셀만 허용
+    if ct_data is not None:
+        new_voxels = new_voxels & (ct_data >= threshold)
     result = data.copy()
     result[new_voxels] = 1
 
     added = int(np.sum(new_voxels))
-    print(f"  경계 메꿈: +{added:,} voxels (신장으로 라벨링)")
+    print(f"  경계 메꿈: +{added:,} voxels (신장으로 라벨링, HU ≥ {threshold:.0f})")
     return result
 
 
@@ -740,7 +748,7 @@ def func_trim_cyst_boundary(data, ct_data=None, **kwargs):
     tolerance = input_float(
         f"  허용 HU 범위 (평균 ± X, 기본 {max(cyst_std * 2, 15):.0f})",
         default=round(max(cyst_std * 2, 15)))
-    max_iter = input_int("  최대 반복 (기본 50)", default=50)
+    max_iter = input_int("  최대 반복 (기본 1)", default=1)
 
     hu_lo = cyst_mean - tolerance
     hu_hi = cyst_mean + tolerance
@@ -771,6 +779,99 @@ def func_trim_cyst_boundary(data, ct_data=None, **kwargs):
 
 
 # ──────────────────────────────────────────────
+# 기능 15: 물혹 경계 확장
+# ──────────────────────────────────────────────
+
+def func_expand_cyst(data, ct_data=None, **kwargs):
+    """물혹 경계를 HU 범위 내 복셀로 한 겹씩 확장."""
+    if ct_data is None:
+        print("  CT 이미지 없음 — 실행 불가")
+        return data
+
+    cyst_mask = (data == 3)
+    before = int(np.sum(cyst_mask))
+    if before == 0:
+        print("  물혹 라벨 없음")
+        return data
+
+    cyst_vals = ct_data[cyst_mask]
+    cyst_mean = float(np.mean(cyst_vals))
+    cyst_std = float(np.std(cyst_vals))
+    print(f"  물혹: {before:,} voxels, intensity {cyst_mean:.1f} ± {cyst_std:.1f} HU")
+
+    tolerance = input_float(
+        f"  허용 HU 범위 (평균 ± X, 기본 {max(cyst_std * 2, 15):.0f})",
+        default=round(max(cyst_std * 2, 15)))
+    steps = input_int("  확장 횟수 (기본 5)", default=5)
+
+    hu_lo = cyst_mean - tolerance
+    hu_hi = cyst_mean + tolerance
+    print(f"  HU 범위: {hu_lo:.0f} ~ {hu_hi:.0f}")
+
+    hu_good = (ct_data >= hu_lo) & (ct_data <= hu_hi)
+    struct = ndimage.generate_binary_structure(3, 1)
+    mask = cyst_mask.copy()
+    total_added = 0
+
+    for step in range(steps):
+        dilated = ndimage.binary_dilation(mask, structure=struct)
+        # 신장(1) 영역만 확장 대상 (종양/배경 침범 방지)
+        candidates = dilated & ~mask & (data == 1)
+        accepted = candidates & hu_good
+        added = int(np.sum(accepted))
+        total_added += added
+
+        if added == 0:
+            print(f"    Step {step + 1}: 확장 가능 복셀 없음 — 종료")
+            break
+
+        mask[accepted] = True
+        print(f"    Step {step + 1}: +{added:,} voxels")
+
+    result = data.copy()
+    result[mask & ~cyst_mask] = 3
+    print(f"  물혹 확장 완료: {before:,} → {before + total_added:,} (+{total_added:,} voxels)")
+    return result
+
+
+# ──────────────────────────────────────────────
+# 기능 16: 세그멘테이션 합치기
+# ──────────────────────────────────────────────
+
+def func_merge_segmentations(data, **kwargs):
+    """외부 파일에서 신장 라벨을 가져와 현재 세그멘테이션의 신장을 교체."""
+    print("  신장(1) 라벨을 가져올 파일 경로:")
+    path_a = input("  경로: ").strip().strip('"')
+    if not os.path.exists(path_a):
+        print(f"  파일을 찾을 수 없음: {path_a}")
+        raise CancelOperation()
+
+    data_a = np.round(np.asanyarray(nib.load(path_a).dataobj)).astype(np.uint16)
+
+    if data_a.shape != data.shape:
+        print(f"  shape 불일치: 외부={data_a.shape}, 현재={data.shape}")
+        raise CancelOperation()
+
+    kidney_a = (data_a == 1)
+    tumor_b = (data == 2)
+    cyst_b = (data == 3)
+
+    print(f"  외부 파일 — 신장: {int(np.sum(kidney_a)):,} voxels")
+    print(f"  현재 파일 — 종양: {int(np.sum(tumor_b)):,}, 물혹: {int(np.sum(cyst_b)):,} voxels")
+
+    # 현재 파일 기반으로 신장만 외부 파일 것으로 교체
+    result = data.copy()
+    result[result == 1] = 0       # 기존 신장 제거
+    result[kidney_a & (result == 0)] = 1  # 외부 신장 삽입
+
+    total = int(np.sum(result > 0))
+    print(f"  합친 결과: 신장={int(np.sum(result == 1)):,}, "
+          f"종양={int(np.sum(result == 2)):,}, "
+          f"물혹={int(np.sum(result == 3)):,}, 전체={total:,} voxels")
+    return result
+
+
+# ──────────────────────────────────────────────
 # 메인 루프
 # ──────────────────────────────────────────────
 
@@ -789,6 +890,8 @@ FUNCTIONS = {
     "12": ("신장 돌출부 제거", func_remove_protrusion),
     "13": ("물혹 smoothing", func_smooth_cyst),
     "14": ("물혹 경계 HU 트리밍", func_trim_cyst_boundary),
+    "15": ("물혹 경계 확장", func_expand_cyst),
+    "16": ("세그멘테이션 합치기 (신장 + 종양/물혹)", func_merge_segmentations),
     "r": ("롤백 (직전 상태로 되돌리기)", None),  # 특수 처리
 }
 
