@@ -52,8 +52,8 @@ python segtools.py S004
 6. Proceed to next function or q to quit
 ```
 
-- Enter `q` at any input step to cancel the current function.
-- Enter `r` at any input step to rollback to the previous state.
+- Enter `b` at any input step to cancel and return to the function selection menu.
+- Rollback (`r`) is available at the function selection menu or immediately after execution.
 - On first run, the original file is automatically backed up to `backup_original/`.
 
 ---
@@ -76,6 +76,7 @@ python segtools.py S004
 | 12 | Convex Hull Labeling | Create 3D convex hull from seeds and fill interior |
 | 13 | Merge Segmentations | Replace kidney label from external file |
 | 14 | Phase Comparison | Compare all phases simultaneously |
+| m | Region Restricted Run | Restrict to slice/bbox/direction then run a function |
 | r | Rollback | Revert to previous state |
 
 ---
@@ -337,10 +338,48 @@ Loads all phases (A, D, P) simultaneously and performs cross-phase analysis. Doe
 
 ---
 
+### Region Restricted Run (m)
+
+Restricts function execution to a specific region. Areas outside the region are preserved unchanged.
+
+**Region restriction methods (can be combined):**
+
+**1. Slice Range**
+
+| Parameter | Description |
+|-----------|-------------|
+| Axis | Select axis 0 / 1 / 2 |
+| Start slice | Range start |
+| End slice | Range end |
+
+**2. 3D Bounding Box**
+
+| Parameter | Description |
+|-----------|-------------|
+| X (axis 0) start/end | X range |
+| Y (axis 1) start/end | Y range |
+| Z (axis 2) start/end | Z range |
+
+**3. Direction Restriction**
+
+Anatomical directions (R/L/A/P/S/I) are automatically detected from the NIfTI affine matrix, matching the direction labels shown in CT viewers.
+
+| Direction | Meaning |
+|-----------|---------|
+| R (Right) / L (Left) | Lateral |
+| A (Anterior) / P (Posterior) | Front/Back |
+| S (Superior) / I (Inferior) | Up/Down |
+
+Select one of 6 directions and a cut slice to restrict the region to that half.
+
+**After region setup**, select a function (2–13) to run within the restricted region.
+
+---
+
 ### Rollback (r)
 
 Reverts to the previous state. Multiple rollback levels are supported.
-After any function execution, you can immediately enter `r` to rollback.
+Enter `r` at the function selection menu or immediately after execution to rollback.
 
 ---
 
