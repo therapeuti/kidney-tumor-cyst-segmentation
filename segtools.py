@@ -1126,6 +1126,120 @@ def func_compare_phases(phases):
 
 
 # ──────────────────────────────────────────────
+# 영역 지정 Region Restriction
+# ──────────────────────────────────────────────
+
+def build_region_mask(shape, affine):
+    """슬라이스 범위, 바운딩 박스, 방향을 조합하여 3D 마스크 생성."""
+    mask = np.ones(shape, dtype=bool)
+
+    print("\n  영역 지정 모드 Region Restriction Mode")
+    print("  현재 shape Current shape:", shape)
+
+    # ── 1. 슬라이스 범위 Slice range ──
+    use_slice = input_choice("  슬라이스 범위 제한? Restrict slice range?", [
+        "1: 예 Yes",
+        "2: 아니오 No (전체 슬라이스 All slices)",
+    ])
+    if use_slice == "1":
+        axis = input_choice("  축 선택 Select axis", [
+            "0: axis 0 (shape={})".format(shape[0]),
+            "1: axis 1 (shape={})".format(shape[1]),
+            "2: axis 2 (shape={})".format(shape[2]),
+        ])
+        axis = int(axis)
+        start = input_int(f"  시작 슬라이스 Start slice (기본 default 0)", default=0)
+        end = input_int(f"  끝 슬라이스 End slice (기본 default {shape[axis]-1})", default=shape[axis]-1)
+        start = max(0, min(start, shape[axis]-1))
+        end = max(start, min(end, shape[axis]-1))
+        slicing = [slice(None)] * 3
+        slicing[axis] = slice(0, start)
+        mask[tuple(slicing)] = False
+        slicing[axis] = slice(end + 1, shape[axis])
+        mask[tuple(slicing)] = False
+        print(f"  → axis {axis}, 슬라이스 slice {start}~{end} ({end-start+1} slices)")
+
+    # ── 2. 3D 바운딩 박스 Bounding box ──
+    use_bbox = input_choice("  바운딩 박스 제한? Restrict bounding box?", [
+        "1: 예 Yes",
+        "2: 아니오 No",
+    ])
+    if use_bbox == "1":
+        for ax, name in enumerate(["X (axis 0)", "Y (axis 1)", "Z (axis 2)"]):
+            lo = input_int(f"  {name} 시작 start (기본 default 0)", default=0)
+            hi = input_int(f"  {name} 끝 end (기본 default {shape[ax]-1})", default=shape[ax]-1)
+            lo = max(0, min(lo, shape[ax]-1))
+            hi = max(lo, min(hi, shape[ax]-1))
+            slicing = [slice(None)] * 3
+            slicing[ax] = slice(0, lo)
+            mask[tuple(slicing)] = False
+            slicing[ax] = slice(hi + 1, shape[ax])
+            mask[tuple(slicing)] = False
+            print(f"  → {name}: {lo}~{hi}")
+
+    # ── 3. 방향 제한 Direction restriction ──
+    use_dir = input_choice("  방향 제한? Restrict direction?", [
+        "1: 예 Yes",
+        "2: 아니오 No",
+    ])
+    if use_dir == "1":
+        ax_codes = nib.aff2axcodes(affine)
+        print(f"  축 방향 Axis orientation: axis0={ax_codes[0]}, axis1={ax_codes[1]}, axis2={ax_codes[2]}")
+
+        # 각 축의 양쪽 방향 매핑
+        opposites = {'R': 'L', 'L': 'R', 'A': 'P', 'P': 'A', 'S': 'I', 'I': 'S'}
+        dir_names = {
+            'R': 'Right 우', 'L': 'Left 좌',
+            'A': 'Anterior 전', 'P': 'Posterior 후',
+            'S': 'Superior 상', 'I': 'Inferior 하',
+        }
+
+        # 6방향 중 선택
+        all_dirs = []
+        for ax_idx, code in enumerate(ax_codes):
+            opp = opposites[code]
+            all_dirs.append((code, ax_idx, "low"))
+            all_dirs.append((opp, ax_idx, "high"))
+
+        options = [f"{i+1}: {dir_names[d[0]]} ({d[0]}, axis {d[1]})" for i, d in enumerate(all_dirs)]
+        dir_choice = input_choice("  제한할 방향 Direction to restrict", options)
+        chosen = all_dirs[int(dir_choice) - 1]
+        dir_code, dir_axis, dir_side = chosen
+
+        mid = shape[dir_axis] // 2
+        cut = input_int(
+            f"  기준 슬라이스 Cut at slice (기본 default {mid}, 범위 range 0~{shape[dir_axis]-1})",
+            default=mid)
+        cut = max(0, min(cut, shape[dir_axis]-1))
+
+        slicing = [slice(None)] * 3
+        if dir_side == "low":
+            # 해당 방향 = 낮은 인덱스 쪽 → 낮은 쪽만 유지
+            slicing[dir_axis] = slice(cut, shape[dir_axis])
+            mask[tuple(slicing)] = False
+            print(f"  → {dir_names[dir_code]} 방향: axis {dir_axis}, slice 0~{cut-1} 유지")
+        else:
+            # 해당 방향 = 높은 인덱스 쪽 → 높은 쪽만 유지
+            slicing[dir_axis] = slice(0, cut + 1)
+            mask[tuple(slicing)] = False
+            print(f"  → {dir_names[dir_code]} 방향: axis {dir_axis}, slice {cut+1}~{shape[dir_axis]-1} 유지")
+
+    restricted = int(np.sum(mask))
+    total = int(np.prod(shape))
+    print(f"\n  영역 지정 완료 Region set: {restricted:,} / {total:,} voxels ({restricted/total*100:.1f}%)")
+    return mask
+
+
+def apply_with_region(func, data, region_mask, **kwargs):
+    """영역 지정 마스크 적용: 영역 안에서만 기능 실행, 밖은 원본 유지."""
+    result = func(data, **kwargs)
+    # 영역 밖은 원본으로 복원
+    final = data.copy()
+    final[region_mask] = result[region_mask]
+    return final
+
+
+# ──────────────────────────────────────────────
 # 메인 루프
 # ──────────────────────────────────────────────
 
@@ -1144,6 +1258,7 @@ FUNCTIONS = {
     "12": ("볼록 껍질 라벨링 Convex Hull Labeling (종양/물혹)", func_label_convex),
     "13": ("세그멘테이션 합치기 Merge Segmentations", func_merge_segmentations),
     "14": ("Phase 비교 분석 Phase Comparison", None),
+    "m": ("영역 지정 실행 Region Restricted Run", None),
     "r": ("롤백 Rollback", None),
 }
 
@@ -1216,6 +1331,101 @@ def main():
         # ── Phase 비교 분석 처리 ──
         if func_input == "14":
             func_compare_phases(phases)
+            continue
+
+        # ── 영역 지정 실행 처리 ──
+        if func_input == "m":
+            # 영역 지정 가능한 기능 목록 (분석/비교/롤백/영역지정 자체 제외)
+            region_funcs = {k: v for k, v in FUNCTIONS.items()
+                           if k not in ("1", "14", "m", "r") and v[1] is not None}
+
+            print(f"\n  영역 지정 후 실행할 기능 선택 Select function for region run:")
+            for key, (name, _) in region_funcs.items():
+                print(f"    {key}: {name}")
+            print(f"    b: 돌아가기 Back")
+
+            rf_input = input("\n  기능 Function: ").strip().lower()
+            if rf_input == "b" or rf_input not in region_funcs:
+                if rf_input != "b":
+                    print("  → 유효한 기능 번호를 입력하세요")
+                continue
+
+            rf_name, rf_func = region_funcs[rf_input]
+
+            for phase in selected_phases:
+                seg_path = phases[phase]["seg"]
+                img_path = phases[phase]["img"]
+
+                print(f"\n{'='*50}")
+                print(f"  [{phase} phase] 영역 지정 Region Restriction + {rf_name}")
+                print(f"{'='*50}")
+
+                seg_img = nib.load(seg_path)
+                data = np.round(np.asanyarray(seg_img.dataobj)).astype(np.uint16)
+                zooms = seg_img.header.get_zooms()
+
+                ct_data = None
+                if img_path and os.path.exists(img_path):
+                    ct_img = nib.load(img_path)
+                    ct_data = np.asanyarray(ct_img.dataobj).astype(np.float32)
+
+                # 영역 지정
+                try:
+                    region_mask = build_region_mask(data.shape, seg_img.affine)
+                except CancelOperation:
+                    print("\n  취소됨 Cancelled.")
+                    continue
+
+                # 기능 실행 (영역 제한)
+                try:
+                    result = apply_with_region(rf_func, data, region_mask,
+                                               ct_data=ct_data, zooms=zooms)
+                except CancelOperation:
+                    print("\n  취소됨 Cancelled.")
+                    continue
+
+                if np.array_equal(data, result):
+                    print("\n  변경 없음 No changes.")
+                    continue
+
+                changed = int(np.sum(data != result))
+                print(f"\n  변경된 복셀 Changed voxels: {changed:,}")
+
+                if phase not in rollback_history:
+                    rollback_history[phase] = []
+                rollback_history[phase].append((data.copy(), f"[영역지정] {rf_name}", seg_img))
+
+                backup_file(seg_path)
+                save_result(seg_path, result, seg_img)
+
+                history_depth = len(rollback_history[phase])
+                print(f"  (롤백 가능 Rollback available: {history_depth}단계 steps)")
+
+                while True:
+                    prompt = "  다음 Next? (enter:계속 continue / r:롤백 rollback"
+                    if len(selected_phases) > 1:
+                        prompt += " / q:나머지 건너뛰기 skip rest"
+                    prompt += "): "
+                    next_input = input(prompt).strip().lower()
+                    if next_input == "":
+                        break
+                    elif next_input == "q" and len(selected_phases) > 1:
+                        break
+                    elif next_input == "r":
+                        if phase in rollback_history and len(rollback_history[phase]) > 0:
+                            prev_data, prev_desc, prev_img = rollback_history[phase][-1]
+                            print(f"  [{phase} phase] 롤백: '{prev_desc}' 이전 상태로 되돌리기")
+                            save_result(seg_path, prev_data, prev_img)
+                            rollback_history[phase].pop()
+                            print(f"  남은 히스토리: {len(rollback_history[phase])}단계")
+                        else:
+                            print(f"  [{phase} phase] 롤백 히스토리 없음")
+                        break
+                    else:
+                        valid = "enter / r / q" if len(selected_phases) > 1 else "enter / r"
+                        print(f"    → {valid} 중 하나를 입력하세요")
+                if next_input == "q":
+                    break
             continue
 
         # ── 롤백 처리 ──
