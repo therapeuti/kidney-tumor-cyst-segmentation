@@ -995,6 +995,11 @@ def func_compare_phases(phases):
 
     label_names = {0: "배경", 1: "신장", 2: "종양", 3: "물혹"}
 
+    # Shape 정보 출력
+    print(f"\n  Phase별 Shape:")
+    for p in phase_keys:
+        print(f"    {p}: {phase_data[p].shape}")
+
     # ── 2. Phase별 라벨 크기/비율 ──
     print(f"\n{'='*60}")
     print(f"  Phase별 라벨 크기 비교")
@@ -1048,6 +1053,11 @@ def func_compare_phases(phases):
     from itertools import combinations
     for p1, p2 in combinations(phase_keys, 2):
         print(f"\n  [{p1} vs {p2}]")
+
+        if phase_data[p1].shape != phase_data[p2].shape:
+            print(f"    ⚠ Shape 불일치: {p1}={phase_data[p1].shape}, {p2}={phase_data[p2].shape} — 건너뜀")
+            continue
+
         for label in [1, 2, 3]:
             name = label_names[label]
             mask1 = (phase_data[p1] == label)
@@ -1078,6 +1088,11 @@ def func_compare_phases(phases):
 
     for p1, p2 in combinations(phase_keys, 2):
         print(f"\n  [{p1} vs {p2}]")
+
+        if phase_data[p1].shape != phase_data[p2].shape:
+            print(f"    ⚠ Shape 불일치 — 건너뜀")
+            continue
+
         for label in [1, 2, 3]:
             name = label_names[label]
             mask1 = (phase_data[p1] == label)
