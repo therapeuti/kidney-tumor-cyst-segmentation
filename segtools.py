@@ -303,8 +303,11 @@ def _smooth_cyst(data, zooms):
     mask_final = ndimage.binary_fill_holes(mask_final) & allowed
 
     result = data.copy()
-    # 기존 물혹 → 신장으로 되돌린 뒤, smoothed 물혹 적용
-    result[cyst_mask] = 1
+    # 기존 물혹 → 배경 인접이면 배경, 아니면 신장
+    struct_adj = ndimage.generate_binary_structure(3, 1)
+    bg_adj = ndimage.binary_dilation((data == 0), structure=struct_adj)
+    result[cyst_mask & bg_adj] = 0
+    result[cyst_mask & ~bg_adj] = 1
     result[mask_final] = 3
 
     after = int(np.sum(result == 3))
