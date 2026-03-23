@@ -1128,7 +1128,7 @@ FUNCTIONS = {
     "6": ("경계 확장 (신장/종양/물혹)", func_expand),
     "7": ("경계 축소 (신장(장기 외곽)/종양/물혹)", func_trim_boundary),
     "8": ("경계 계단 메꿈", func_fill_staircase),
-    "9": ("신장 돌출부 제거", func_remove_protrusion),
+    "9": ("돌출부 제거", func_remove_protrusion),
     "10": ("내부 구멍 채우기", func_fill_holes),
     "11": ("고립 신장 → 종양 재라벨링", func_relabel_isolated_kidney),
     "12": ("볼록 껍질 기반 라벨링 (종양/물혹)", func_label_convex),
@@ -1282,28 +1282,32 @@ def main():
             history_depth = len(rollback_history[phase])
             print(f"  (롤백 가능: {history_depth}단계)")
 
-            # 다중 phase 실행 시 phase별 확인
-            if len(selected_phases) > 1:
-                while True:
-                    next_input = input("  다음? (enter:계속 / r:이 phase 롤백 / q:나머지 건너뛰기): ").strip().lower()
-                    if next_input == "":
-                        break
-                    elif next_input == "q":
-                        break
-                    elif next_input == "r":
-                        if phase in rollback_history and len(rollback_history[phase]) > 0:
-                            prev_data, prev_desc, prev_img = rollback_history[phase][-1]
-                            print(f"  [{phase} phase] 롤백: '{prev_desc}' 이전 상태로 되돌리기")
-                            save_result(seg_path, prev_data, prev_img)
-                            rollback_history[phase].pop()
-                            print(f"  남은 히스토리: {len(rollback_history[phase])}단계")
-                        else:
-                            print(f"  [{phase} phase] 롤백 히스토리 없음")
-                        break
-                    else:
-                        print("    → enter / r / q 중 하나를 입력하세요")
-                if next_input == "q":
+            # 저장 후 확인
+            while True:
+                prompt = "  다음? (enter:계속 / r:롤백"
+                if len(selected_phases) > 1:
+                    prompt += " / q:나머지 건너뛰기"
+                prompt += "): "
+                next_input = input(prompt).strip().lower()
+                if next_input == "":
                     break
+                elif next_input == "q" and len(selected_phases) > 1:
+                    break
+                elif next_input == "r":
+                    if phase in rollback_history and len(rollback_history[phase]) > 0:
+                        prev_data, prev_desc, prev_img = rollback_history[phase][-1]
+                        print(f"  [{phase} phase] 롤백: '{prev_desc}' 이전 상태로 되돌리기")
+                        save_result(seg_path, prev_data, prev_img)
+                        rollback_history[phase].pop()
+                        print(f"  남은 히스토리: {len(rollback_history[phase])}단계")
+                    else:
+                        print(f"  [{phase} phase] 롤백 히스토리 없음")
+                    break
+                else:
+                    valid = "enter / r / q" if len(selected_phases) > 1 else "enter / r"
+                    print(f"    → {valid} 중 하나를 입력하세요")
+            if next_input == "q":
+                break
 
 
 if __name__ == "__main__":
