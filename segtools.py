@@ -68,7 +68,7 @@ def save_result(path, data, img):
     new_header["scl_inter"] = 0
     new_img = nib.Nifti1Image(data, img.affine, new_header)
     nib.save(new_img, path)
-    print(f"  저장 완료: {path}")
+    print(f"  저장 완료 Saved: {path}")
 
 
 # phase별 롤백 히스토리 {phase: [(data, description), ...]}
@@ -79,10 +79,10 @@ rollback_history = {}
 def print_label_info(data, ct_data=None):
     """현재 라벨 상태 출력."""
     labels = np.unique(data)
-    print(f"\n  현재 라벨 상태:")
+    print(f"\n  현재 라벨 상태 Current label status:")
     for label in labels:
         count = int(np.sum(data == label))
-        name = {0: "배경", 1: "신장", 2: "종양", 3: "물혹"}.get(int(label), f"라벨{label}")
+        name = {0: "배경 BG", 1: "신장 Kidney", 2: "종양 Tumor", 3: "물혹 Cyst"}.get(int(label), f"label{label}")
         info = f"    {name}(label {int(label)}): {count:>12,} voxels"
         if ct_data is not None and label > 0:
             vals = ct_data[data == label]
@@ -97,7 +97,7 @@ def print_label_info(data, ct_data=None):
 
 def func_remove_isolated(data, **kwargs):
     """고립 복셀 제거 (신장/종양 선택)"""
-    target = input_choice("  대상 선택", ["1: 신장(label 1)", "2: 종양(label 2)", "3: 둘 다"])
+    target = input_choice("  대상 선택 Select target", ["1: 신장 Kidney (label 1)", "2: 종양 Tumor (label 2)", "3: 둘 다 Both"])
     keep_n_map = {"1": (1, 2), "2": (2, 1), "3": None}
 
     if target == "3":
@@ -149,7 +149,7 @@ def _remove_isolated_label(data, label, keep_n):
 def func_remove_low_intensity(data, ct_data=None, **kwargs):
     """intensity ≤ 0인 신장/종양 복셀 삭제."""
     if ct_data is None:
-        print("  CT 이미지 없음 — 실행 불가")
+        print("  CT 이미지 없음 No CT image — 실행 불가 cannot run")
         return data
 
     low = (ct_data <= 0)
@@ -174,10 +174,10 @@ def func_remove_low_intensity(data, ct_data=None, **kwargs):
 def func_remove_high_intensity(data, ct_data=None, **kwargs):
     """intensity ≥ 400인 신장/종양 복셀 삭제."""
     if ct_data is None:
-        print("  CT 이미지 없음 — 실행 불가")
+        print("  CT 이미지 없음 No CT image — 실행 불가 cannot run")
         return data
 
-    threshold = input_int("  Threshold (기본 400)", default=400)
+    threshold = input_int("  Threshold (기본 default 400)", default=400)
     high = (ct_data >= threshold)
     result = data.copy()
 
@@ -199,10 +199,10 @@ def func_remove_high_intensity(data, ct_data=None, **kwargs):
 
 def func_smooth(data, zooms=None, **kwargs):
     """Smoothing 통합 — 대상 선택 후 실행."""
-    target = input_choice("  Smoothing 대상", [
-        "1: 종양(label 2)",
-        "2: 물혹(label 3)",
-        "3: 장기 전체 외곽(신장+종양+물혹)",
+    target = input_choice("  Smoothing 대상 Select target", [
+        "1: 종양 Tumor (label 2)",
+        "2: 물혹 Cyst (label 3)",
+        "3: 장기 전체 외곽 Whole organ surface",
     ])
 
     if target == "1":
@@ -224,9 +224,9 @@ def _smooth_tumor(data, zooms):
         print("  종양 라벨 없음")
         return data
 
-    sigma = input_float("  Gaussian sigma mm (기본 1.0)", default=1.0)
-    close_iter = input_int("  Closing 반복 (기본 3)", default=3)
-    open_iter = input_int("  Opening 반복 (기본 2)", default=2)
+    sigma = input_float("  Gaussian sigma mm (기본 default 1.0)", default=1.0)
+    close_iter = input_int("  Closing 반복 iterations (기본 default 3)", default=3)
+    open_iter = input_int("  Opening 반복 iterations (기본 default 2)", default=2)
 
     mask = tumor_mask.astype(np.float64)
 
@@ -272,9 +272,9 @@ def _smooth_cyst(data, zooms):
         print("  물혹 라벨 없음")
         return data
 
-    sigma = input_float("  Gaussian sigma mm (기본 1.0)", default=1.0)
-    close_iter = input_int("  Closing 반복 (기본 2)", default=2)
-    open_iter = input_int("  Opening 반복 (기본 1)", default=1)
+    sigma = input_float("  Gaussian sigma mm (기본 default 1.0)", default=1.0)
+    close_iter = input_int("  Closing 반복 iterations (기본 default 2)", default=2)
+    open_iter = input_int("  Opening 반복 iterations (기본 default 1)", default=1)
 
     # 물혹이 존재할 수 있는 영역: 기존 신장 + 물혹
     allowed = kidney_mask | cyst_mask
@@ -322,10 +322,10 @@ def _smooth_organ(data, zooms):
         print("  신장 라벨 없음")
         return data
 
-    sigma = input_float("  Gaussian sigma mm (기본 1.0)", default=1.0)
-    close_iter = input_int("  Closing 반복 (기본 3)", default=3)
-    open_iter = input_int("  Opening 반복 (기본 2)", default=2)
-    keep_n = input_int("  유지할 component 수 (기본 2)", default=2)
+    sigma = input_float("  Gaussian sigma mm (기본 default 1.0)", default=1.0)
+    close_iter = input_int("  Closing 반복 iterations (기본 default 3)", default=3)
+    open_iter = input_int("  Opening 반복 iterations (기본 default 2)", default=2)
+    keep_n = input_int("  유지할 component 수 Components to keep (기본 default 2)", default=2)
 
     cyst_mask = (data == 3)
     organ_mask = (kidney_mask | tumor_mask | cyst_mask).astype(np.uint8)
@@ -385,13 +385,13 @@ def _smooth_organ(data, zooms):
 def func_expand(data, ct_data=None, **kwargs):
     """Intensity 기반 경계 확장 — 대상 및 조건 선택."""
     if ct_data is None:
-        print("  CT 이미지 없음 — 실행 불가")
+        print("  CT 이미지 없음 No CT image — 실행 불가 cannot run")
         return data
 
-    target = input_choice("  확장 대상", [
-        "1: 신장(label 1)",
-        "2: 종양(label 2)",
-        "3: 물혹(label 3)",
+    target = input_choice("  확장 대상 Expansion target", [
+        "1: 신장 Kidney (label 1)",
+        "2: 종양 Tumor (label 2)",
+        "3: 물혹 Cyst (label 3)",
     ])
 
     label = int(target)
@@ -406,10 +406,10 @@ def func_expand(data, ct_data=None, **kwargs):
     # 확장 가능 영역: 신장은 배경만, 종양/물혹은 배경+신장
     if label == 1:
         expandable = (data == 0)
-        print("  확장 영역: 배경")
+        print("  확장 영역 Expandable: 배경 Background")
     else:
         expandable = (data == 0) | (data == 1)
-        print("  확장 영역: 배경 + 신장")
+        print("  확장 영역 Expandable: 배경 Background + 신장 Kidney")
 
     # intensity 통계 표시
     vals = ct_data[mask]
@@ -418,26 +418,26 @@ def func_expand(data, ct_data=None, **kwargs):
     print(f"  {name} intensity: {val_mean:.1f} ± {val_std:.1f} HU")
 
     # intensity 조건 선택
-    mode = input_choice("  Intensity 조건", [
-        "1: 하한만 (≥ threshold)",
-        "2: 양방향 범위 (평균 ± tolerance)",
+    mode = input_choice("  Intensity 조건 Condition", [
+        "1: 하한만 Lower bound only (≥ threshold)",
+        "2: 양방향 범위 Bidirectional range (mean ± tolerance)",
     ])
 
     if mode == "1":
-        threshold = input_float("  최소 intensity HU (기본 120)", default=120.0)
+        threshold = input_float("  최소 intensity HU Min intensity (기본 default 120)", default=120.0)
         hu_filter = (ct_data >= threshold)
         print(f"  조건: HU ≥ {threshold:.0f}")
     else:
         default_tol = round(max(val_std * 2, 15))
         tolerance = input_float(
-            f"  허용 HU 범위 (평균 ± X, 기본 {default_tol})",
+            f"  허용 HU 범위 HU range (mean ± X, 기본 default {default_tol})",
             default=default_tol)
         hu_lo = val_mean - tolerance
         hu_hi = val_mean + tolerance
         hu_filter = (ct_data >= hu_lo) & (ct_data <= hu_hi)
         print(f"  조건: HU {hu_lo:.0f} ~ {hu_hi:.0f}")
 
-    steps = input_int("  확장 횟수 (기본 5)", default=5)
+    steps = input_int("  확장 횟수 Expansion steps (기본 default 5)", default=5)
 
     expand_mask = mask.copy()
     struct = ndimage.generate_binary_structure(3, 1)
@@ -511,7 +511,7 @@ def input_choice(prompt, options):
     """선택지 입력."""
     for opt in options:
         print(f"    {opt}")
-    print(f"    b: 돌아가기")
+    print(f"    b: 돌아가기 Back")
     while True:
         val = input(f"  {prompt}: ").strip()
         _check_special(val)
@@ -522,7 +522,7 @@ def input_choice(prompt, options):
 
 
 def input_int(prompt, default):
-    val = input(f"  {prompt} (b:돌아가기): ").strip()
+    val = input(f"  {prompt} (b:돌아가기 Back): ").strip()
     _check_special(val)
     if val == "":
         return default
@@ -533,7 +533,7 @@ def input_int(prompt, default):
 
 
 def input_float(prompt, default):
-    val = input(f"  {prompt} (b:돌아가기): ").strip()
+    val = input(f"  {prompt} (b:돌아가기 Back): ").strip()
     _check_special(val)
     if val == "":
         return default
@@ -549,7 +549,7 @@ def input_float(prompt, default):
 
 def func_fill_holes(data, **kwargs):
     """라벨 내부 구멍을 채우기 (외곽 형태 유지)."""
-    target = input_choice("  대상 선택", ["1: 신장(label 1)", "2: 종양(label 2)", "3: 신장+종양 장기 전체", "4: 물혹(label 3)"])
+    target = input_choice("  대상 선택 Select target", ["1: 신장 Kidney (label 1)", "2: 종양 Tumor (label 2)", "3: 신장+종양 장기 전체 Whole organ", "4: 물혹 Cyst (label 3)"])
 
     if target == "3":
         # 신장+종양 합쳐서 fill → 채워진 부분은 신장으로
@@ -644,9 +644,9 @@ def func_relabel_isolated_kidney(data, **kwargs):
 
 def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
     """시드 전체 복셀 → 3D 볼록 껍질 → 내부 전체 채움."""
-    target = input_choice("  라벨링 대상", [
-        "1: 종양(label 2)",
-        "2: 물혹(label 3)",
+    target = input_choice("  라벨링 대상 Labeling target", [
+        "1: 종양 Tumor (label 2)",
+        "2: 물혹 Cyst (label 3)",
     ])
 
     if target == "1":
@@ -730,8 +730,8 @@ def func_fill_staircase(data, ct_data=None, **kwargs):
         print("  신장/종양 라벨 없음")
         return data
 
-    iterations = input_int("  Closing 반복 (기본 1)", default=1)
-    threshold = input_float("  최소 intensity HU (기본 120)", default=120.0)
+    iterations = input_int("  Closing 반복 iterations (기본 default 1)", default=1)
+    threshold = input_float("  최소 intensity HU Min intensity (기본 default 120)", default=120.0)
 
     # 26-connectivity: 대각 방향 포함하여 계단 틈새를 채움
     struct = ndimage.generate_binary_structure(3, 3)
@@ -764,7 +764,7 @@ def func_remove_protrusion(data, **kwargs):
         print("  신장 라벨 없음")
         return data
 
-    iterations = input_int("  Opening 반복 (기본 1)", default=1)
+    iterations = input_int("  Opening 반복 iterations (기본 default 1)", default=1)
 
     # Opening: erosion → dilation — 얇은 돌출부가 제거됨
     struct = ndimage.generate_binary_structure(3, 1)
@@ -792,13 +792,13 @@ def func_remove_protrusion(data, **kwargs):
 def func_trim_boundary(data, ct_data=None, **kwargs):
     """경계에서 HU 범위 밖 복셀을 바깥부터 반복 깎아냄."""
     if ct_data is None:
-        print("  CT 이미지 없음 — 실행 불가")
+        print("  CT 이미지 없음 No CT image — 실행 불가 cannot run")
         return data
 
-    target = input_choice("  트리밍 대상", [
-        "1: 신장 — 장기 전체 외곽 (신장+종양+물혹)",
-        "2: 종양(label 2)",
-        "3: 물혹(label 3)",
+    target = input_choice("  트리밍 대상 Trimming target", [
+        "1: 장기 전체 외곽 Whole organ surface",
+        "2: 종양 Tumor (label 2)",
+        "3: 물혹 Cyst (label 3)",
     ])
 
     if target == "1":
@@ -838,9 +838,9 @@ def _trim_single(data, ct_data, label, name):
 
     default_tol = round(max(val_std * 2, 15))
     tolerance = input_float(
-        f"  허용 HU 범위 (평균 ± X, 기본 {default_tol})",
+        f"  허용 HU 범위 HU range (mean ± X, 기본 default {default_tol})",
         default=default_tol)
-    max_iter = input_int("  최대 반복 (기본 1)", default=1)
+    max_iter = input_int("  최대 반복 Max iterations (기본 default 1)", default=1)
 
     hu_lo = val_mean - tolerance
     hu_hi = val_mean + tolerance
@@ -892,9 +892,9 @@ def _trim_organ(data, ct_data):
 
     default_tol = round(max(val_std * 2, 15))
     tolerance = input_float(
-        f"  허용 HU 범위 (평균 ± X, 기본 {default_tol})",
+        f"  허용 HU 범위 HU range (mean ± X, 기본 default {default_tol})",
         default=default_tol)
-    max_iter = input_int("  최대 반복 (기본 1)", default=1)
+    max_iter = input_int("  최대 반복 Max iterations (기본 default 1)", default=1)
 
     hu_lo = val_mean - tolerance
     hu_hi = val_mean + tolerance
@@ -934,8 +934,8 @@ def _trim_organ(data, ct_data):
 
 def func_merge_segmentations(data, **kwargs):
     """외부 파일에서 신장 라벨을 가져와 현재 세그멘테이션의 신장을 교체."""
-    print("  신장(1) 라벨을 가져올 파일 경로:")
-    path_a = input("  경로: ").strip().strip('"')
+    print("  신장(1) 라벨을 가져올 파일 경로 File path for kidney label:")
+    path_a = input("  경로 Path: ").strip().strip('"')
     if not os.path.exists(path_a):
         print(f"  파일을 찾을 수 없음: {path_a}")
         raise CancelOperation()
@@ -973,7 +973,7 @@ def func_compare_phases(phases):
     """모든 phase의 세그멘테이션을 로드하여 비교 분석."""
     phase_keys = sorted(phases.keys())
     if len(phase_keys) < 2:
-        print("  비교할 phase가 2개 이상 필요합니다.")
+        print("  비교할 phase가 2개 이상 필요합니다 Need at least 2 phases to compare.")
         return
 
     # ── 1. 모든 phase 로드 ──
@@ -1130,21 +1130,21 @@ def func_compare_phases(phases):
 # ──────────────────────────────────────────────
 
 FUNCTIONS = {
-    "1": ("라벨 상태 분석", func_analyze),
-    "2": ("고립 복셀 제거", func_remove_isolated),
-    "3": ("저강도 제거 (intensity ≤ 0)", func_remove_low_intensity),
-    "4": ("고강도 제거 (intensity ≥ threshold)", func_remove_high_intensity),
-    "5": ("Smoothing (종양/물혹/장기 전체 외곽)", func_smooth),
-    "6": ("경계 확장 (신장/종양/물혹)", func_expand),
-    "7": ("경계 축소 (신장(장기 외곽)/종양/물혹)", func_trim_boundary),
-    "8": ("경계 계단 메꿈", func_fill_staircase),
-    "9": ("돌출부 제거", func_remove_protrusion),
-    "10": ("내부 구멍 채우기", func_fill_holes),
-    "11": ("고립 신장 → 종양 재라벨링", func_relabel_isolated_kidney),
-    "12": ("볼록 껍질 기반 라벨링 (종양/물혹)", func_label_convex),
-    "13": ("세그멘테이션 합치기 (신장 + 종양/물혹)", func_merge_segmentations),
-    "14": ("Phase 비교 분석", None),  # 특수 처리: 모든 phase 동시 로드
-    "r": ("롤백 (직전 상태로 되돌리기)", None),  # 특수 처리
+    "1": ("라벨 상태 분석 Label Analysis", func_analyze),
+    "2": ("고립 복셀 제거 Remove Isolated", func_remove_isolated),
+    "3": ("저강도 제거 Remove Low Intensity (≤ 0)", func_remove_low_intensity),
+    "4": ("고강도 제거 Remove High Intensity (≥ threshold)", func_remove_high_intensity),
+    "5": ("Smoothing (종양 Tumor/물혹 Cyst/장기 전체 Organ)", func_smooth),
+    "6": ("경계 확장 Boundary Expansion (신장/종양/물혹)", func_expand),
+    "7": ("경계 축소 Boundary Trimming (장기 외곽 Organ/종양/물혹)", func_trim_boundary),
+    "8": ("경계 계단 메꿈 Staircase Fill", func_fill_staircase),
+    "9": ("돌출부 제거 Protrusion Removal", func_remove_protrusion),
+    "10": ("내부 구멍 채우기 Fill Internal Holes", func_fill_holes),
+    "11": ("고립 신장→종양 재라벨링 Relabel Isolated Kidney→Tumor", func_relabel_isolated_kidney),
+    "12": ("볼록 껍질 라벨링 Convex Hull Labeling (종양/물혹)", func_label_convex),
+    "13": ("세그멘테이션 합치기 Merge Segmentations", func_merge_segmentations),
+    "14": ("Phase 비교 분석 Phase Comparison", None),
+    "r": ("롤백 Rollback", None),
 }
 
 
@@ -1166,17 +1166,17 @@ def main():
         print(f"세그멘테이션 파일을 찾을 수 없음: {case_dir}")
         sys.exit(1)
 
-    print(f"\n케이스: {case_name}")
-    print(f"사용 가능한 phase: {', '.join(sorted(phases.keys()))}")
+    print(f"\n케이스 Case: {case_name}")
+    print(f"사용 가능한 phase Available phases: {', '.join(sorted(phases.keys()))}")
 
     while True:
         # Phase 선택
         print(f"\n{'─'*50}")
-        print(f"Phase 선택 (q: 종료)")
+        print(f"Phase 선택 Select phase (q: 종료 quit)")
         for p in sorted(phases.keys()):
             ct_status = "CT있음" if phases[p]["img"] else "CT없음"
             print(f"  {p}: {os.path.basename(phases[p]['seg'])} ({ct_status})")
-        print(f"  all: 모든 phase에 동일 작업 실행")
+        print(f"  all: 모든 phase에 동일 작업 실행 Apply to all phases")
 
         phase_input = input("\n  Phase: ").strip()
         if phase_input.upper() in ("Q", "QUIT", "EXIT"):
@@ -1192,7 +1192,7 @@ def main():
             continue
 
         # 기능 선택
-        print(f"\n  기능 선택:")
+        print(f"\n  기능 선택 Select function:")
         for key, (name, _) in FUNCTIONS.items():
             # 롤백은 히스토리 있을 때만 표시
             if key == "r":
@@ -1202,9 +1202,9 @@ def main():
                     print(f"    {key}: {name}")
             else:
                 print(f"    {key}: {name}")
-        print(f"    b: 돌아가기")
+        print(f"    b: 돌아가기 Back")
 
-        func_input = input("\n  기능: ").strip().lower()
+        func_input = input("\n  기능 Function: ").strip().lower()
         if func_input == "b":
             continue
         if func_input not in FUNCTIONS:
@@ -1259,16 +1259,16 @@ def main():
             try:
                 result = func(data, ct_data=ct_data, zooms=zooms)
             except CancelOperation:
-                print("\n  취소됨.")
+                print("\n  취소됨 Cancelled.")
                 continue
 
             # 변경 확인
             if np.array_equal(data, result):
-                print("\n  변경 없음.")
+                print("\n  변경 없음 No changes.")
                 continue
 
             changed = int(np.sum(data != result))
-            print(f"\n  변경된 복셀: {changed:,}")
+            print(f"\n  변경된 복셀 Changed voxels: {changed:,}")
 
             # 저장 (히스토리에 이전 상태 저장 후 결과 저장)
             if phase not in rollback_history:
@@ -1279,13 +1279,13 @@ def main():
             save_result(seg_path, result, seg_img)
 
             history_depth = len(rollback_history[phase])
-            print(f"  (롤백 가능: {history_depth}단계)")
+            print(f"  (롤백 가능 Rollback available: {history_depth}단계 steps)")
 
             # 저장 후 확인
             while True:
-                prompt = "  다음? (enter:계속 / r:롤백"
+                prompt = "  다음 Next? (enter:계속 continue / r:롤백 rollback"
                 if len(selected_phases) > 1:
-                    prompt += " / q:나머지 건너뛰기"
+                    prompt += " / q:나머지 건너뛰기 skip rest"
                 prompt += "): "
                 next_input = input(prompt).strip().lower()
                 if next_input == "":
