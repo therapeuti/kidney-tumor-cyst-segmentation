@@ -1305,6 +1305,11 @@ def main():
             print("종료.")
             break
 
+        # 한글 입력 매핑
+        hangul_phase = {"ㅁ": "A", "ㅇ": "D", "ㅔ": "P"}
+        if phase_input in hangul_phase:
+            phase_input = hangul_phase[phase_input]
+
         if phase_input.lower() == "all":
             selected_phases = sorted(phases.keys())
         elif phase_input.upper() in phases:
