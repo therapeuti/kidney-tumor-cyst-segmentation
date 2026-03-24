@@ -667,7 +667,7 @@ def func_relabel_isolated_kidney(data, **kwargs):
 # ──────────────────────────────────────────────
 
 def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
-    """시드 전체 복셀 → 3D 볼록 껍질 → 내부 전체 채움."""
+    """3D 또는 슬라이스별 2D 볼록 껍질로 라벨링."""
     target = input_choice("  라벨링 대상 Labeling target", [
         "1: 종양 Tumor (label 2)",
         "2: 물혹 Cyst (label 3)",
@@ -690,41 +690,23 @@ def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
         print(f"  → 여러 평면(axial/sagittal/coronal)에서 {name} 영역을 label {label}로 칠해주세요.")
         return data
 
-    if n_seed < 4:
-        print(f"  시드가 4개 미만({n_seed})이면 볼록 껍질을 만들 수 없습니다.")
+    method = input_choice("  방식 Method", [
+        "1: 3D ConvexHull (시드가 여러 축에 분포된 경우 When seeds span multiple axes)",
+        "2: 슬라이스별 2D ConvexHull + 보간 Slice-by-slice 2D + interpolation",
+    ])
+
+    if method == "1":
+        fill_mask = _label_convex_3d(data, seed_mask, n_seed)
+    else:
+        fill_mask = _label_convex_2d(data, seed_mask, n_seed)
+
+    if fill_mask is None:
         return data
-
-    # ── 1. 시드 전체 복셀 → 껍질 꼭짓점 ──
-    coords = np.argwhere(seed_mask)
-    print(f"  껍질 꼭짓점: {len(coords):,} voxels")
-
-    # ── 2. 3D 볼록 껍질 생성 ──
-    try:
-        hull = ConvexHull(coords)
-        delaunay = Delaunay(coords[hull.vertices])
-    except Exception as e:
-        print(f"  볼록 껍질 계산 실패: {e}")
-        print("  → 시드를 여러 평면에 걸쳐 더 넓게 칠해주세요.")
-        return data
-
-    # ── 3. 껍질 내부 전체 채움 ──
-    margin = 1
-    mins = np.maximum(coords.min(axis=0) - margin, 0)
-    maxs = np.minimum(coords.max(axis=0) + margin + 1, data.shape)
-
-    grid = np.mgrid[mins[0]:maxs[0], mins[1]:maxs[1], mins[2]:maxs[2]]
-    test_points = grid.reshape(3, -1).T
-
-    print(f"  내부 판정 중... ({len(test_points):,} voxels)")
-    inside = delaunay.find_simplex(test_points) >= 0
-
-    fill_mask = np.zeros(data.shape, dtype=bool)
-    fill_mask[test_points[inside, 0], test_points[inside, 1], test_points[inside, 2]] = True
 
     # 시드는 무조건 포함
     fill_mask = fill_mask | seed_mask
 
-    # ── 4. 최종 제약: 보호 라벨 침범 방지 ──
+    # 보호 라벨 침범 방지 ──
     fill_mask = (fill_mask & ~protect_mask) | seed_mask
 
     total = int(np.sum(fill_mask))
@@ -733,6 +715,109 @@ def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
     result = data.copy()
     result[fill_mask] = label
     return result
+
+
+def _label_convex_3d(data, seed_mask, n_seed):
+    """3D ConvexHull로 내부 전체 채움."""
+    coords = np.argwhere(seed_mask)
+    print(f"  꼭짓점 Vertices: {len(coords):,} voxels")
+
+    if len(coords) < 4:
+        print("  시드 4개 미만 — 3D 볼록 껍질 불가")
+        return None
+
+    try:
+        hull = ConvexHull(coords)
+        delaunay = Delaunay(coords[hull.vertices])
+    except Exception as e:
+        print(f"  볼록 껍질 계산 실패 ConvexHull failed: {e}")
+        print("  → 시드를 여러 축에 걸쳐 칠해주세요 Paint seeds across multiple axes")
+        return None
+
+    margin = 1
+    mins = np.maximum(coords.min(axis=0) - margin, 0)
+    maxs = np.minimum(coords.max(axis=0) + margin + 1, data.shape)
+
+    grid = np.mgrid[mins[0]:maxs[0], mins[1]:maxs[1], mins[2]:maxs[2]]
+    test_points = grid.reshape(3, -1).T
+
+    print(f"  내부 판정 중 Testing interior... ({len(test_points):,} voxels)")
+    inside = delaunay.find_simplex(test_points) >= 0
+
+    fill_mask = np.zeros(data.shape, dtype=bool)
+    fill_mask[test_points[inside, 0], test_points[inside, 1], test_points[inside, 2]] = True
+    return fill_mask
+
+
+def _label_convex_2d(data, seed_mask, n_seed):
+    """슬라이스별 2D ConvexHull + 슬라이스 간 보간."""
+    axis = input_choice("  슬라이스 축 Slice axis", [
+        f"0: axis 0 (shape={data.shape[0]})",
+        f"1: axis 1 (shape={data.shape[1]})",
+        f"2: axis 2 (shape={data.shape[2]})",
+    ])
+    axis = int(axis)
+
+    # 시드가 있는 슬라이스 찾기
+    seed_slices = []
+    for i in range(data.shape[axis]):
+        sl = [slice(None)] * 3
+        sl[axis] = i
+        if np.any(seed_mask[tuple(sl)]):
+            seed_slices.append(i)
+
+    if len(seed_slices) == 0:
+        print("  시드 슬라이스 없음 No seed slices")
+        return None
+
+    print(f"  시드 슬라이스 Seed slices: {len(seed_slices)}개 (범위 range: {seed_slices[0]}~{seed_slices[-1]})")
+
+    # 슬라이스별 2D Convex Hull
+    hull_masks = {}
+    other_axes = [s for i, s in enumerate(data.shape) if i != axis]
+
+    for si in seed_slices:
+        sl = [slice(None)] * 3
+        sl[axis] = si
+        slice_seed = seed_mask[tuple(sl)]
+        coords_2d = np.argwhere(slice_seed)
+        if len(coords_2d) < 3:
+            hull_masks[si] = slice_seed.copy()
+            continue
+        try:
+            hull = ConvexHull(coords_2d)
+            delaunay = Delaunay(coords_2d[hull.vertices])
+            grid = np.mgrid[0:other_axes[0], 0:other_axes[1]]
+            test_pts = grid.reshape(2, -1).T
+            inside = delaunay.find_simplex(test_pts) >= 0
+            hull_mask = inside.reshape(other_axes[0], other_axes[1])
+            hull_masks[si] = hull_mask | slice_seed
+        except Exception:
+            hull_masks[si] = slice_seed.copy()
+
+    # 슬라이스 간 보간
+    fill_mask = np.zeros(data.shape, dtype=bool)
+
+    for si, hmask in hull_masks.items():
+        sl = [slice(None)] * 3
+        sl[axis] = si
+        fill_mask[tuple(sl)] = hmask
+
+    for idx in range(len(seed_slices) - 1):
+        s_start = seed_slices[idx]
+        s_end = seed_slices[idx + 1]
+        if s_end - s_start <= 1:
+            continue
+        mask_start = hull_masks[s_start].astype(float)
+        mask_end = hull_masks[s_end].astype(float)
+        for si in range(s_start + 1, s_end):
+            t = (si - s_start) / (s_end - s_start)
+            interp = mask_start * (1 - t) + mask_end * t
+            sl = [slice(None)] * 3
+            sl[axis] = si
+            fill_mask[tuple(sl)] = interp >= 0.5
+
+    return fill_mask
 
 
 # ──────────────────────────────────────────────
