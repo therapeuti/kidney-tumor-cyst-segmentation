@@ -146,8 +146,8 @@ Combines morphological operations (closing, opening) with Gaussian smoothing to 
 
 | Input | Target | Behavior |
 |-------|--------|----------|
-| `1` | Tumor (label 2) | Smooths tumor boundary only. Keeps only the largest component. Constrained within kidney+tumor region |
-| `2` | Cyst (label 3) | Smooths cyst boundary. Constrained within kidney+cyst region. Auto-fills internal holes |
+| `1` | Tumor (label 2) | Smooths tumor boundary only. Keeps only the largest component. Cyst protected. Lost voxels assigned to background/kidney based on proximity |
+| `2` | Cyst (label 3) | Smooths cyst boundary. Constrained within kidney+cyst region. Auto-fills internal holes. Lost voxels assigned to background/kidney based on proximity |
 | `3` | Whole organ surface | Merges kidney+tumor+cyst and smooths the outer surface. Preserves tumor/cyst labels inside |
 
 **Step 2 — Parameter Input:**
@@ -235,16 +235,35 @@ After selection, the target's intensity statistics (mean ± std HU) are displaye
 
 ### Function 8: Staircase Fill
 
-Fills staircase-like gaps in the organ boundary (kidney+tumor) using 26-connectivity binary closing. Filled voxels become kidney (1). Tumor and cyst labels are protected.
+Fills staircase-like gaps in the organ boundary (kidney+tumor+cyst).
+Filled voxels are assigned the nearest existing label (kidney/tumor/cyst).
 
 **Requires:** HU filter is applied when CT image is available.
 
-**Parameters:**
+**Step 1 — Method Selection:**
+
+| Input | Method | Description |
+|-------|--------|-------------|
+| `1` | Closing | 26-connectivity closing to fill concave gaps. 1 iteration fills single-voxel diagonal gaps |
+| `2` | Convex Hull | Per-slice 2D Convex Hull to fill convex staircase patterns |
+
+**Common Parameter:**
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| Closing iterations | Fill strength. 1 fills single-voxel diagonal gaps | 1 |
 | Minimum intensity HU | Only fill voxels ≥ this value | 120 |
+
+**Closing mode additional parameter:**
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| Closing iterations | Fill strength | 1 |
+
+**Convex Hull mode additional parameter:**
+
+| Parameter | Description |
+|-----------|-------------|
+| Slice axis | Select axis 0 / 1 / 2 |
 
 ---
 
