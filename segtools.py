@@ -537,7 +537,7 @@ def input_choice(prompt, options):
         print(f"    {opt}")
     print(f"    b: 돌아가기 Back")
     while True:
-        val = input(f"  {prompt}: ").strip()
+        val = input(f"  => {prompt}: ").strip()
         _check_special(val)
         valid = [opt.split(":")[0].strip() for opt in options]
         if val in valid:
@@ -546,7 +546,7 @@ def input_choice(prompt, options):
 
 
 def input_int(prompt, default):
-    val = input(f"  {prompt} (b:돌아가기 Back): ").strip()
+    val = input(f"  => {prompt} (b:돌아가기 Back): ").strip()
     _check_special(val)
     if val == "":
         return default
@@ -557,7 +557,7 @@ def input_int(prompt, default):
 
 
 def input_float(prompt, default):
-    val = input(f"  {prompt} (b:돌아가기 Back): ").strip()
+    val = input(f"  => {prompt} (b:돌아가기 Back): ").strip()
     _check_special(val)
     if val == "":
         return default
@@ -1187,7 +1187,7 @@ def _trim_organ(data, ct_data):
 def func_merge_segmentations(data, **kwargs):
     """외부 파일에서 신장 라벨을 가져와 현재 세그멘테이션의 신장을 교체."""
     print("  신장(1) 라벨을 가져올 파일 경로 File path for kidney label:")
-    path_a = input("  경로 Path: ").strip().strip('"')
+    path_a = input("  => 경로 Path: ").strip().strip('"')
     if not os.path.exists(path_a):
         print(f"  파일을 찾을 수 없음: {path_a}")
         raise CancelOperation()
@@ -1547,7 +1547,7 @@ def main():
             print(f"  {p}: {os.path.basename(phases[p]['seg'])} ({ct_status})")
         print(f"  all: 모든 phase에 동일 작업 실행 Apply to all phases")
 
-        phase_input = input("\n  Phase: ").strip()
+        phase_input = input("\n  => Phase: ").strip()
         if phase_input.upper() in ("Q", "QUIT", "EXIT", "ㅂ"):
             print("종료.")
             break
@@ -1578,7 +1578,7 @@ def main():
                 print(f"    {key}: {name}")
         print(f"    b: 돌아가기 Back")
 
-        func_input = input("\n  기능 Function: ").strip().lower()
+        func_input = input("\n  => 기능 Function: ").strip().lower()
         if func_input in ("b", "ㅠ"):
             continue
         if func_input not in FUNCTIONS:
@@ -1603,7 +1603,7 @@ def main():
                 print(f"    {key}: {name}")
             print(f"    b: 돌아가기 Back")
 
-            rf_input = input("\n  기능 Function: ").strip().lower()
+            rf_input = input("\n  => 기능 Function: ").strip().lower()
             if rf_input in ("b", "ㅠ") or rf_input not in region_funcs:
                 if rf_input != "b":
                     print("  → 유효한 기능 번호를 입력하세요")
@@ -1661,7 +1661,7 @@ def main():
                 print(f"  (롤백 가능 Rollback available: {history_depth}단계 steps)")
 
                 while True:
-                    prompt = "  다음 Next? (enter:계속 continue / r:롤백 rollback"
+                    prompt = "  => 다음 Next? (enter:계속 continue / r:롤백 rollback"
                     if len(selected_phases) > 1:
                         prompt += " / q:나머지 건너뛰기 skip rest"
                     prompt += "): "
@@ -1752,7 +1752,7 @@ def main():
 
             # 저장 후 확인
             while True:
-                prompt = "  다음 Next? (enter:계속 continue / r:롤백 rollback"
+                prompt = "  => 다음 Next? (enter:계속 continue / r:롤백 rollback"
                 if len(selected_phases) > 1:
                     prompt += " / q:나머지 건너뛰기 skip rest"
                 prompt += "): "
