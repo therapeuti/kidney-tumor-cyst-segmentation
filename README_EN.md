@@ -75,7 +75,8 @@ python segtools.py S004
 | 11 | Relabel Isolated Kidney → Tumor | Convert tumor-adjacent isolated kidney to tumor |
 | 12 | Convex Hull Labeling | Create 3D convex hull from seeds and fill interior |
 | 13 | Merge Segmentations | Replace kidney label from external file |
-| 14 | Phase Comparison | Compare all phases simultaneously |
+| 14 | Resample & Merge | Resample external segmentation with different shape and merge |
+| 15 | Phase Comparison | Compare all phases simultaneously |
 | m | Region Restricted Run | Restrict to slice/bbox/direction then run a function |
 | r | Rollback | Revert to previous state |
 
@@ -376,7 +377,30 @@ Used to combine kidney/tumor segmentations from different models or methods.
 
 ---
 
-### Function 14: Phase Comparison
+### Function 14: Resample & Merge
+
+Resamples labels from an external segmentation file with a different shape into the current segmentation's coordinate space. Useful when phases have different shapes (e.g., applying kidney labels from A phase to D/P phase).
+
+Function 13 (Merge Segmentations) requires matching shapes, while this function uses the NIfTI affine matrix to perform spatial coordinate transformation with nearest neighbor resampling.
+
+**Step 1 — Source file path input:**
+
+Source and current file shape/voxel sizes are displayed.
+
+**Step 2 — Label Selection:**
+
+| Input | Target | Behavior |
+|-------|--------|----------|
+| `1` | Kidney (label 1) | Replace current kidney with source kidney |
+| `2` | Tumor (label 2) | Replace current tumor with source tumor |
+| `3` | Cyst (label 3) | Replace current cyst with source cyst |
+| `4` | All (kidney+tumor+cyst) | Import all labels from source |
+
+Labels not selected for import are preserved from the current file.
+
+---
+
+### Function 15: Phase Comparison
 
 Loads all phases (A, D, P) simultaneously and performs cross-phase analysis. Does not modify data. Runs regardless of phase selection.
 

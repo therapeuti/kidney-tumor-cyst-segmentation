@@ -1218,6 +1218,100 @@ def func_merge_segmentations(data, **kwargs):
 
 
 # ──────────────────────────────────────────────
+# 기능: 리샘플링 세그멘테이션 합치기
+# ──────────────────────────────────────────────
+
+def func_merge_resample(data, seg_img=None, **kwargs):
+    """외부 파일의 라벨을 리샘플링하여 현재 세그멘테이션에 합침."""
+    if seg_img is None:
+        print("  현재 세그멘테이션 이미지 정보 없음")
+        raise CancelOperation()
+
+    print("  라벨을 가져올 파일 경로 Source file path:")
+    src_path = input("  => 경로 Path: ").strip().strip('"')
+    if not os.path.exists(src_path):
+        print(f"  파일을 찾을 수 없음: {src_path}")
+        raise CancelOperation()
+
+    src_img = nib.load(src_path)
+    src_data = np.round(np.asanyarray(src_img.dataobj)).astype(np.uint16)
+
+    print(f"  소스: shape={src_data.shape}, voxel={tuple(round(float(z), 3) for z in src_img.header.get_zooms()[:3])}")
+    print(f"  현재: shape={data.shape}, voxel={tuple(round(float(z), 3) for z in seg_img.header.get_zooms()[:3])}")
+
+    # 가져올 라벨 선택
+    label_choice = input_choice("  가져올 라벨 Label to import", [
+        "1: 신장 Kidney (label 1)",
+        "2: 종양 Tumor (label 2)",
+        "3: 물혹 Cyst (label 3)",
+        "4: 전체 All (신장+종양+물혹)",
+    ])
+
+    if label_choice == "4":
+        import_labels = [1, 2, 3]
+    else:
+        import_labels = [int(label_choice)]
+
+    label_names = {1: "신장 Kidney", 2: "종양 Tumor", 3: "물혹 Cyst"}
+
+    # 리샘플링: 현재 세그멘테이션 공간으로 변환
+    from scipy.ndimage import affine_transform
+
+    # 소스 → 물리 → 현재 변환 행렬 계산
+    # src_voxel → world: src_img.affine
+    # world → dst_voxel: inv(seg_img.affine)
+    src_aff = src_img.affine
+    dst_aff = seg_img.affine
+    src2dst = np.linalg.inv(dst_aff) @ src_aff
+
+    # affine_transform은 output→input 매핑이므로 역변환 필요
+    dst2src = np.linalg.inv(src2dst)
+    matrix = dst2src[:3, :3]
+    offset = dst2src[:3, 3]
+
+    print("  리샘플링 중 Resampling...")
+
+    # 라벨별로 개별 리샘플링 (nearest neighbor)
+    result = data.copy()
+    total_imported = 0
+
+    for lbl in import_labels:
+        src_mask = (src_data == lbl).astype(np.float64)
+        src_count = int(np.sum(src_mask))
+        if src_count == 0:
+            print(f"  {label_names[lbl]}: 소스에 라벨 없음 no label in source")
+            continue
+
+        # nearest neighbor: float으로 변환 후 0.5 threshold
+        resampled = affine_transform(
+            src_mask, matrix, offset,
+            output_shape=data.shape,
+            order=0,  # nearest neighbor
+            mode='constant', cval=0.0,
+        )
+        resampled_mask = resampled > 0.5
+
+        dst_count = int(np.sum(resampled_mask))
+        print(f"  {label_names[lbl]}: 소스 source {src_count:,} → 리샘플링 resampled {dst_count:,} voxels")
+
+        # 기존 라벨 제거 후 삽입
+        result[result == lbl] = 0
+        # 다른 라벨(가져오지 않는 라벨) 보호
+        protect = np.zeros(data.shape, dtype=bool)
+        for other_lbl in [1, 2, 3]:
+            if other_lbl not in import_labels:
+                protect |= (result == other_lbl)
+        result[resampled_mask & ~protect] = lbl
+        total_imported += int(np.sum(resampled_mask & ~protect))
+
+    print(f"\n  합친 결과 Merged result: 신장={int(np.sum(result == 1)):,}, "
+          f"종양={int(np.sum(result == 2)):,}, "
+          f"물혹={int(np.sum(result == 3)):,}, "
+          f"전체={int(np.sum(result > 0)):,} voxels")
+    return result
+
+
+# ──────────────────────────────────────────────
 # 기능: Phase 비교 분석
 # ──────────────────────────────────────────────
 
@@ -1511,7 +1605,8 @@ FUNCTIONS = {
     "11": ("고립 신장→종양 재라벨링 Relabel Isolated Kidney→Tumor", func_relabel_isolated_kidney),
     "12": ("볼록 껍질 라벨링 Convex Hull Labeling (종양/물혹)", func_label_convex),
     "13": ("세그멘테이션 합치기 Merge Segmentations", func_merge_segmentations),
-    "14": ("Phase 비교 분석 Phase Comparison", None),
+    "14": ("리샘플링 합치기 Resample & Merge", func_merge_resample),
+    "15": ("Phase 비교 분석 Phase Comparison", None),
     "m": ("영역 지정 실행 Region Restricted Run", None),
     "r": ("롤백 Rollback", None),
 }
@@ -1588,7 +1683,7 @@ def main():
         func_name, func = FUNCTIONS[func_input]
 
         # ── Phase 비교 분석 처리 ──
-        if func_input == "14":
+        if func_input == "15":
             func_compare_phases(phases)
             continue
 
@@ -1596,7 +1691,7 @@ def main():
         if func_input in ("m", "ㅡ"):
             # 영역 지정 가능한 기능 목록 (분석/비교/롤백/영역지정 자체 제외)
             region_funcs = {k: v for k, v in FUNCTIONS.items()
-                           if k not in ("1", "14", "m", "r") and v[1] is not None}
+                           if k not in ("1", "15", "m", "r") and v[1] is not None}
 
             print(f"\n  영역 지정 후 실행할 기능 선택 Select function for region run:")
             for key, (name, _) in region_funcs.items():
@@ -1638,7 +1733,7 @@ def main():
                 # 기능 실행 (영역 제한)
                 try:
                     result = apply_with_region(rf_func, data, region_mask,
-                                               ct_data=ct_data, zooms=zooms)
+                                               ct_data=ct_data, zooms=zooms, seg_img=seg_img)
                 except CancelOperation:
                     print("\n  취소됨 Cancelled.")
                     continue
@@ -1726,7 +1821,7 @@ def main():
 
             # 실행
             try:
-                result = func(data, ct_data=ct_data, zooms=zooms)
+                result = func(data, ct_data=ct_data, zooms=zooms, seg_img=seg_img)
             except CancelOperation:
                 print("\n  취소됨 Cancelled.")
                 continue
