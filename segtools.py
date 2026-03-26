@@ -200,17 +200,17 @@ def func_remove_high_intensity(data, ct_data=None, **kwargs):
 def func_smooth(data, zooms=None, **kwargs):
     """Smoothing 통합 — 대상 선택 후 실행."""
     target = input_choice("  Smoothing 대상 Select target", [
-        "1: 종양 Tumor (label 2)",
-        "2: 물혹 Cyst (label 3)",
-        "3: 장기 전체 외곽 Whole organ surface",
+        "1: 장기 전체 외곽 Whole organ surface",
+        "2: 종양 Tumor (label 2)",
+        "3: 물혹 Cyst (label 3)",
     ])
 
     if target == "1":
-        return _smooth_tumor(data, zooms)
-    elif target == "2":
-        return _smooth_cyst(data, zooms)
-    else:
         return _smooth_organ(data, zooms)
+    elif target == "2":
+        return _smooth_tumor(data, zooms)
+    else:
+        return _smooth_cyst(data, zooms)
 
 
 def _smooth_tumor(data, zooms):
@@ -1659,6 +1659,10 @@ def main():
     print(f"\n케이스 Case: {case_name}")
     print(f"사용 가능한 phase Available phases: {', '.join(sorted(phases.keys()))}")
 
+    # CT 로딩이 필요한 함수 목록
+    CT_FUNCS = {func_analyze, func_remove_low_intensity, func_remove_high_intensity,
+                func_expand, func_trim_boundary, func_fill_staircase, func_label_convex}
+
     while True:
         # Phase 선택
         print(f"\n{'─'*50}")
@@ -1744,10 +1748,19 @@ def main():
                 data = np.round(np.asanyarray(seg_img.dataobj)).astype(np.uint16)
                 zooms = seg_img.header.get_zooms()
 
-                ct_data = None
-                if img_path and os.path.exists(img_path):
-                    ct_img = nib.load(img_path)
-                    ct_data = np.asanyarray(ct_img.dataobj).astype(np.float32)
+                # CT lazy loading
+                _ct_cache = {}
+                def get_ct_data():
+                    if "ct" not in _ct_cache:
+                        if img_path and os.path.exists(img_path):
+                            print("  CT 로딩 중 Loading CT...")
+                            ct_img = nib.load(img_path)
+                            _ct_cache["ct"] = np.asanyarray(ct_img.dataobj).astype(np.float32)
+                        else:
+                            _ct_cache["ct"] = None
+                    return _ct_cache["ct"]
+
+                ct_data = get_ct_data() if rf_func in CT_FUNCS else None
 
                 # 영역 지정
                 try:
@@ -1840,10 +1853,19 @@ def main():
             data = np.round(np.asanyarray(seg_img.dataobj)).astype(np.uint16)
             zooms = seg_img.header.get_zooms()
 
-            ct_data = None
-            if img_path and os.path.exists(img_path):
-                ct_img = nib.load(img_path)
-                ct_data = np.asanyarray(ct_img.dataobj).astype(np.float32)
+            # CT lazy loading: 필요한 함수에서만 로드
+            _ct_cache = {}
+            def get_ct_data():
+                if "ct" not in _ct_cache:
+                    if img_path and os.path.exists(img_path):
+                        print("  CT 로딩 중 Loading CT...")
+                        ct_img = nib.load(img_path)
+                        _ct_cache["ct"] = np.asanyarray(ct_img.dataobj).astype(np.float32)
+                    else:
+                        _ct_cache["ct"] = None
+                return _ct_cache["ct"]
+
+            ct_data = get_ct_data() if func in CT_FUNCS else None
 
             # 실행
             try:
