@@ -13,7 +13,7 @@ class PostprocessParamDefinition(BaseModel):
     label: str
     type: str
     required: bool = True
-    default: str | int | float | None = None
+    default: str | int | float | bool | None = None
     options: list[PostprocessParamOption] = Field(default_factory=list)
 
 
