@@ -16,6 +16,26 @@ import nibabel as nib
 import numpy as np
 from scipy import ndimage
 from scipy.spatial import ConvexHull, Delaunay
+from segtools_core import (
+    FUNCTION_LABELS,
+    LABEL_METADATA,
+    BoundingBoxParams,
+    DirectionCutParams,
+    FillHolesParams,
+    LabelConvexParams,
+    RegionParams,
+    RemoveHighIntensityParams,
+    RemoveIsolatedParams,
+    SliceRangeParams,
+    apply_with_region,
+    build_region_mask_from_params,
+    fill_holes,
+    get_label_name,
+    label_convex,
+    remove_high_intensity,
+    remove_isolated,
+    remove_low_intensity,
+)
 
 
 # ──────────────────────────────────────────────
@@ -741,23 +761,15 @@ def func_relabel_isolated_kidney(data, **kwargs):
 # ──────────────────────────────────────────────
 
 def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
-    """3D 또는 슬라이스별 2D 볼록 껍질로 라벨링."""
+    """CLI wrapper for reusable convex hull labeling."""
     target = input_choice("  라벨링 대상 Labeling target", [
         "1: 종양 Tumor (label 2)",
         "2: 물혹 Cyst (label 3)",
     ])
+    label = 2 if target == "1" else 3
+    name = "종양" if label == 2 else "물혹"
 
-    if target == "1":
-        label = 2
-        name = "종양"
-        seed_mask = (data == 2)
-        protect_mask = (data == 3)  # 물혹 보호
-    else:
-        label = 3
-        name = "물혹"
-        seed_mask = (data == 3)
-        protect_mask = (data == 2)  # 종양 보호
-
+    seed_mask = data == label
     n_seed = int(np.sum(seed_mask))
     if n_seed == 0:
         print(f"  {name} 시드(label {label})가 없습니다.")
@@ -765,47 +777,43 @@ def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
         return data
 
     # ── Component 분리 및 선택 ──
+    component_indices = None
     labeled_arr, n_comp = ndimage.label(seed_mask)
     if n_comp >= 2:
         comp_info = []
         for ci in range(1, n_comp + 1):
-            comp_mask = (labeled_arr == ci)
+            comp_mask = labeled_arr == ci
             comp_size = int(np.sum(comp_mask))
             comp_coords = np.argwhere(comp_mask)
             slices_range = f"slice {comp_coords[:, 0].min()}~{comp_coords[:, 0].max()}"
-            comp_info.append((ci, comp_size, slices_range, comp_mask))
+            comp_info.append((ci, comp_size, slices_range))
 
-        comp_info.sort(key=lambda x: -x[1])  # 크기 순 정렬
+        comp_info.sort(key=lambda x: -x[1])
 
         print(f"\n  {name} component {n_comp}개 발견:")
-        for idx, (ci, sz, sr, _) in enumerate(comp_info):
+        for idx, (ci, sz, sr) in enumerate(comp_info):
             print(f"    {idx + 1}: 크기 size {sz:,} voxels ({sr})")
 
         options = [f"a: 전체 각각 자동 처리 Process all individually"]
         options += [f"{idx + 1}: component {idx + 1} ({comp_info[idx][1]:,} voxels)" for idx in range(len(comp_info))]
         sel = input_choice("  처리할 component Select component(s) (쉼표로 복수 선택 comma-separated)", options)
 
-        if sel.lower() == 'a':
-            selected_masks = [(f"component {idx+1}", ci[3]) for idx, ci in enumerate(comp_info)]
-        else:
+        if sel.lower() != 'a':
             indices = [int(s.strip()) - 1 for s in sel.split(",") if s.strip().isdigit()]
-            indices = [i for i in indices if 0 <= i < len(comp_info)]
-            if not indices:
+            component_indices = [i for i in indices if 0 <= i < len(comp_info)]
+            if not component_indices:
                 print("  유효한 선택 없음 No valid selection")
                 return data
-            selected_masks = [(f"component {i+1}", comp_info[i][3]) for i in indices]
-    else:
-        selected_masks = [("전체 all", seed_mask)]
 
-    # ── 방식 선택 (한 번만) ──
-    method = input_choice("  방식 Method", [
+    # ── 방식 선택 ──
+    method_sel = input_choice("  방식 Method", [
         "1: 3D ConvexHull (시드가 여러 축에 분포된 경우 When seeds span multiple axes)",
         "2: 슬라이스별 2D ConvexHull + 보간 Slice-by-slice 2D + interpolation",
     ])
+    method = "3d" if method_sel == "1" else "2d"
 
-    # 2D 방식이면 축도 한 번만 선택
-    slice_axis = None
-    if method == "2":
+    slice_axis = 0
+    if method == "2d":
         axis_sel = input_choice("  슬라이스 축 Slice axis", [
             f"0: axis 0 (shape={data.shape[0]})",
             f"1: axis 1 (shape={data.shape[1]})",
@@ -813,139 +821,22 @@ def func_label_convex(data, ct_data=None, zooms=None, **kwargs):
         ])
         slice_axis = int(axis_sel)
 
-    # ── 각 component별 처리 ──
-    result = data.copy()
-    total_added = 0
+    result, summary = label_convex(data, LabelConvexParams(
+        label=label, method=method,
+        component_indices=component_indices, slice_axis=slice_axis,
+    ))
 
-    for comp_name, comp_seed in selected_masks:
-        comp_n = int(np.sum(comp_seed))
-        print(f"\n  [{comp_name}] 시드 seeds: {comp_n:,} voxels")
-
-        if method == "1":
-            fill_mask = _label_convex_3d(data, comp_seed, comp_n)
+    # ── 결과 출력 ──
+    for comp in summary.details.get("components", []):
+        if comp["skipped"]:
+            print(f"  건너뜀 skipped ({comp['size']:,} voxels)")
         else:
-            fill_mask = _label_convex_2d(data, comp_seed, comp_n, axis=slice_axis)
+            print(f"  {comp['size']:,} → {comp['size'] + comp['added']:,} voxels (+{comp['added']:,})")
 
-        if fill_mask is None:
-            print(f"  [{comp_name}] 건너뜀 skipped")
-            continue
-
-        # 시드 포함 + 보호 라벨 침범 방지
-        fill_mask = fill_mask | comp_seed
-        fill_mask = (fill_mask & ~protect_mask) | comp_seed
-
-        added = int(np.sum(fill_mask)) - comp_n
-        total_added += added
-        print(f"  [{comp_name}] {comp_n:,} → {comp_n + added:,} voxels (+{added:,})")
-
-        result[fill_mask] = label
-
-    print(f"\n  총 결과 Total: {n_seed:,} → {n_seed + total_added:,} voxels (+{total_added:,})")
+    added = summary.details.get("added_voxels", 0)
+    before = summary.details.get("before_voxels", n_seed)
+    print(f"\n  총 결과 Total: {before:,} → {before + added:,} voxels (+{added:,})")
     return result
-
-
-def _label_convex_3d(data, seed_mask, n_seed):
-    """3D ConvexHull로 내부 전체 채움."""
-    coords = np.argwhere(seed_mask)
-    print(f"  꼭짓점 Vertices: {len(coords):,} voxels")
-
-    if len(coords) < 4:
-        print("  시드 4개 미만 — 3D 볼록 껍질 불가")
-        return None
-
-    try:
-        hull = ConvexHull(coords)
-        delaunay = Delaunay(coords[hull.vertices])
-    except Exception as e:
-        print(f"  볼록 껍질 계산 실패 ConvexHull failed: {e}")
-        print("  → 시드를 여러 축에 걸쳐 칠해주세요 Paint seeds across multiple axes")
-        return None
-
-    margin = 1
-    mins = np.maximum(coords.min(axis=0) - margin, 0)
-    maxs = np.minimum(coords.max(axis=0) + margin + 1, data.shape)
-
-    grid = np.mgrid[mins[0]:maxs[0], mins[1]:maxs[1], mins[2]:maxs[2]]
-    test_points = grid.reshape(3, -1).T
-
-    print(f"  내부 판정 중 Testing interior... ({len(test_points):,} voxels)")
-    inside = delaunay.find_simplex(test_points) >= 0
-
-    fill_mask = np.zeros(data.shape, dtype=bool)
-    fill_mask[test_points[inside, 0], test_points[inside, 1], test_points[inside, 2]] = True
-    return fill_mask
-
-
-def _label_convex_2d(data, seed_mask, n_seed, axis=None):
-    """슬라이스별 2D ConvexHull + 슬라이스 간 보간."""
-    if axis is None:
-        axis = input_choice("  슬라이스 축 Slice axis", [
-            f"0: axis 0 (shape={data.shape[0]})",
-            f"1: axis 1 (shape={data.shape[1]})",
-            f"2: axis 2 (shape={data.shape[2]})",
-        ])
-        axis = int(axis)
-
-    # 시드가 있는 슬라이스 찾기
-    seed_slices = []
-    for i in range(data.shape[axis]):
-        sl = [slice(None)] * 3
-        sl[axis] = i
-        if np.any(seed_mask[tuple(sl)]):
-            seed_slices.append(i)
-
-    if len(seed_slices) == 0:
-        print("  시드 슬라이스 없음 No seed slices")
-        return None
-
-    print(f"  시드 슬라이스 Seed slices: {len(seed_slices)}개 (범위 range: {seed_slices[0]}~{seed_slices[-1]})")
-
-    # 슬라이스별 2D Convex Hull
-    hull_masks = {}
-    other_axes = [s for i, s in enumerate(data.shape) if i != axis]
-
-    for si in seed_slices:
-        sl = [slice(None)] * 3
-        sl[axis] = si
-        slice_seed = seed_mask[tuple(sl)]
-        coords_2d = np.argwhere(slice_seed)
-        if len(coords_2d) < 3:
-            hull_masks[si] = slice_seed.copy()
-            continue
-        try:
-            hull = ConvexHull(coords_2d)
-            delaunay = Delaunay(coords_2d[hull.vertices])
-            grid = np.mgrid[0:other_axes[0], 0:other_axes[1]]
-            test_pts = grid.reshape(2, -1).T
-            inside = delaunay.find_simplex(test_pts) >= 0
-            hull_mask = inside.reshape(other_axes[0], other_axes[1])
-            hull_masks[si] = hull_mask | slice_seed
-        except Exception:
-            hull_masks[si] = slice_seed.copy()
-
-    # 슬라이스 간 보간
-    fill_mask = np.zeros(data.shape, dtype=bool)
-
-    for si, hmask in hull_masks.items():
-        sl = [slice(None)] * 3
-        sl[axis] = si
-        fill_mask[tuple(sl)] = hmask
-
-    for idx in range(len(seed_slices) - 1):
-        s_start = seed_slices[idx]
-        s_end = seed_slices[idx + 1]
-        if s_end - s_start <= 1:
-            continue
-        mask_start = hull_masks[s_start].astype(float)
-        mask_end = hull_masks[s_end].astype(float)
-        for si in range(s_start + 1, s_end):
-            t = (si - s_start) / (s_end - s_start)
-            interp = mask_start * (1 - t) + mask_end * t
-            sl = [slice(None)] * 3
-            sl[axis] = si
-            fill_mask[tuple(sl)] = interp >= 0.5
-
-    return fill_mask
 
 
 # ──────────────────────────────────────────────
@@ -1555,11 +1446,13 @@ def func_compare_phases(phases):
 # ──────────────────────────────────────────────
 
 def build_region_mask(shape, affine):
-    """슬라이스 범위, 바운딩 박스, 방향을 조합하여 3D 마스크 생성."""
-    mask = np.ones(shape, dtype=bool)
-
+    """CLI wrapper: 대화형으로 RegionParams를 수집한 뒤 build_region_mask_from_params 호출."""
     print("\n  영역 지정 모드 Region Restriction Mode")
     print("  현재 shape Current shape:", shape)
+
+    slice_range = None
+    bounding_box = None
+    direction_cut = None
 
     # ── 1. 슬라이스 범위 Slice range ──
     use_slice = input_choice("  슬라이스 범위 제한? Restrict slice range?", [
@@ -1567,21 +1460,16 @@ def build_region_mask(shape, affine):
         "2: 아니오 No (전체 슬라이스 All slices)",
     ])
     if use_slice == "1":
-        axis = input_choice("  축 선택 Select axis", [
+        axis = int(input_choice("  축 선택 Select axis", [
             "0: axis 0 (shape={})".format(shape[0]),
             "1: axis 1 (shape={})".format(shape[1]),
             "2: axis 2 (shape={})".format(shape[2]),
-        ])
-        axis = int(axis)
+        ]))
         start = input_int(f"  시작 슬라이스 Start slice (기본 default 0)", default=0)
         end = input_int(f"  끝 슬라이스 End slice (기본 default {shape[axis]-1})", default=shape[axis]-1)
         start = max(0, min(start, shape[axis]-1))
         end = max(start, min(end, shape[axis]-1))
-        slicing = [slice(None)] * 3
-        slicing[axis] = slice(0, start)
-        mask[tuple(slicing)] = False
-        slicing[axis] = slice(end + 1, shape[axis])
-        mask[tuple(slicing)] = False
+        slice_range = SliceRangeParams(axis=axis, start=start, end=end)
         print(f"  → axis {axis}, 슬라이스 slice {start}~{end} ({end-start+1} slices)")
 
     # ── 2. 3D 바운딩 박스 Bounding box ──
@@ -1590,17 +1478,19 @@ def build_region_mask(shape, affine):
         "2: 아니오 No",
     ])
     if use_bbox == "1":
+        bounds = []
         for ax, name in enumerate(["X (axis 0)", "Y (axis 1)", "Z (axis 2)"]):
             lo = input_int(f"  {name} 시작 start (기본 default 0)", default=0)
             hi = input_int(f"  {name} 끝 end (기본 default {shape[ax]-1})", default=shape[ax]-1)
             lo = max(0, min(lo, shape[ax]-1))
             hi = max(lo, min(hi, shape[ax]-1))
-            slicing = [slice(None)] * 3
-            slicing[ax] = slice(0, lo)
-            mask[tuple(slicing)] = False
-            slicing[ax] = slice(hi + 1, shape[ax])
-            mask[tuple(slicing)] = False
+            bounds.append((lo, hi))
             print(f"  → {name}: {lo}~{hi}")
+        bounding_box = BoundingBoxParams(
+            x_start=bounds[0][0], x_end=bounds[0][1],
+            y_start=bounds[1][0], y_end=bounds[1][1],
+            z_start=bounds[2][0], z_end=bounds[2][1],
+        )
 
     # ── 3. 방향 제한 Direction restriction ──
     use_dir = input_choice("  방향 제한? Restrict direction?", [
@@ -1611,7 +1501,6 @@ def build_region_mask(shape, affine):
         ax_codes = nib.aff2axcodes(affine)
         print(f"  축 방향 Axis orientation: axis0={ax_codes[0]}, axis1={ax_codes[1]}, axis2={ax_codes[2]}")
 
-        # 각 축의 양쪽 방향 매핑
         opposites = {'R': 'L', 'L': 'R', 'A': 'P', 'P': 'A', 'S': 'I', 'I': 'S'}
         dir_names = {
             'R': 'Right 우', 'L': 'Left 좌',
@@ -1619,7 +1508,6 @@ def build_region_mask(shape, affine):
             'S': 'Superior 상', 'I': 'Inferior 하',
         }
 
-        # 6방향 중 선택
         all_dirs = []
         for ax_idx, code in enumerate(ax_codes):
             opp = opposites[code]
@@ -1636,34 +1524,20 @@ def build_region_mask(shape, affine):
             f"  기준 슬라이스 Cut at slice (기본 default {mid}, 범위 range 0~{shape[dir_axis]-1})",
             default=mid)
         cut = max(0, min(cut, shape[dir_axis]-1))
+        direction_cut = DirectionCutParams(axis=dir_axis, side=dir_side, cut=cut)
 
-        slicing = [slice(None)] * 3
         if dir_side == "low":
-            # 해당 방향 = 낮은 인덱스 쪽 → 낮은 쪽만 유지
-            slicing[dir_axis] = slice(cut, shape[dir_axis])
-            mask[tuple(slicing)] = False
             print(f"  → {dir_names[dir_code]} 방향: axis {dir_axis}, slice 0~{cut-1} 유지")
         else:
-            # 해당 방향 = 높은 인덱스 쪽 → 높은 쪽만 유지
-            slicing[dir_axis] = slice(0, cut + 1)
-            mask[tuple(slicing)] = False
             print(f"  → {dir_names[dir_code]} 방향: axis {dir_axis}, slice {cut+1}~{shape[dir_axis]-1} 유지")
+
+    params = RegionParams(slice_range=slice_range, bounding_box=bounding_box, direction_cut=direction_cut)
+    mask = build_region_mask_from_params(shape, params)
 
     restricted = int(np.sum(mask))
     total = int(np.prod(shape))
     print(f"\n  영역 지정 완료 Region set: {restricted:,} / {total:,} voxels ({restricted/total*100:.1f}%)")
     return mask
-
-
-def apply_with_region(func, data, region_mask, **kwargs):
-    """영역 지정 마스크 적용: 전체 데이터로 실행 후 영역 안 변경만 반영."""
-    result = func(data, **kwargs)
-    # 변경된 복셀 중 영역 안 + 영역 경계 1복셀 확장 범위만 반영
-    struct = ndimage.generate_binary_structure(3, 1)
-    expanded_region = ndimage.binary_dilation(region_mask, structure=struct, iterations=1)
-    final = data.copy()
-    final[expanded_region] = result[expanded_region]
-    return final
 
 
 # ──────────────────────────────────────────────
@@ -1972,6 +1846,91 @@ def main():
                     print(f"    → {valid} 중 하나를 입력하세요")
             if next_input in ("q", "ㅂ"):
                 break
+
+def func_remove_isolated(data, **kwargs):
+    """CLI wrapper for reusable isolated-component removal."""
+    target = input_choice("  ????좏깮 Select target", ["1: ?좎옣 Kidney (label 1)", "2: 醫낆뼇 Tumor (label 2)", "3: ????Both"])
+    result, summary = remove_isolated(data, RemoveIsolatedParams(target=target))
+    for item in summary.details["labels"]:
+        name = item["label_name"]
+        if item["components"] == 0:
+            print(f"  {name}: ?쇰꺼 ?놁쓬")
+        elif item["removed_components"] == 0:
+            print(f"  {name}: {item['components']}媛?component ???쒓굅 ????놁쓬")
+        else:
+            print(
+                f"  {name}: {item['components']}媛?以??곸쐞 {item['kept_components']}媛??좎?, "
+                f"{item['removed_components']}媛??쒓굅 ({item['removed_voxels']:,} voxels)"
+            )
+    return result
+
+
+def func_remove_low_intensity(data, ct_data=None, **kwargs):
+    """CLI wrapper for reusable low-intensity removal."""
+    if ct_data is None:
+        print("  CT ?대?吏 ?놁쓬 No CT image ???ㅽ뻾 遺덇? cannot run")
+        return data
+
+    result, summary = remove_low_intensity(data, ct_data)
+    for item in summary.details["labels"]:
+        name = item["label_name"]
+        removed = item["removed_voxels"]
+        if removed > 0:
+            print(f"  {name}: -{removed:,} voxels (intensity ??0)")
+        else:
+            print(f"  {name}: ?대떦 ?놁쓬")
+    return result
+
+
+def func_remove_high_intensity(data, ct_data=None, **kwargs):
+    """CLI wrapper for reusable high-intensity removal."""
+    if ct_data is None:
+        print("  CT ?대?吏 ?놁쓬 No CT image ???ㅽ뻾 遺덇? cannot run")
+        return data
+
+    threshold = input_int("  Threshold (湲곕낯 default 400)", default=400)
+    result, summary = remove_high_intensity(data, ct_data, RemoveHighIntensityParams(threshold=threshold))
+    for item in summary.details["labels"]:
+        name = item["label_name"]
+        removed = item["removed_voxels"]
+        if removed > 0:
+            print(f"  {name}: -{removed:,} voxels (intensity ??{threshold})")
+        else:
+            print(f"  {name}: ?대떦 ?놁쓬")
+    return result
+
+
+def func_fill_holes(data, **kwargs):
+    """CLI wrapper for reusable hole filling."""
+    target = input_choice("  ????좏깮 Select target", ["1: ?좎옣 Kidney (label 1)", "2: 醫낆뼇 Tumor (label 2)", "3: ?좎옣+醫낆뼇 ?κ린 ?꾩껜 Whole organ", "4: 臾쇳샊 Cyst (label 3)"])
+    result, summary = fill_holes(data, FillHolesParams(target=target))
+    added = summary.details["added_voxels"]
+    if target == "3":
+        print(f"  ?κ린 ?대? 援щ찉 梨꾩?: +{added:,} voxels (?좎옣?쇰줈 ?쇰꺼留?")
+    else:
+        print(f"  {get_label_name(summary.details['label'])} ?대? 援щ찉 梨꾩?: +{added:,} voxels")
+    return result
+
+
+FUNCTIONS = {
+    "1": (f"?쇰꺼 ?곹깭 遺꾩꽍 {FUNCTION_LABELS['1']}", func_analyze),
+    "2": (f"怨좊┰ 蹂듭? ?쒓굅 {FUNCTION_LABELS['2']}", func_remove_isolated),
+    "3": (f"?媛뺣룄 ?쒓굅 {FUNCTION_LABELS['3']}", func_remove_low_intensity),
+    "4": (f"怨좉컯???쒓굅 {FUNCTION_LABELS['4']}", func_remove_high_intensity),
+    "5": (f"{FUNCTION_LABELS['5']}", func_smooth),
+    "6": (f"寃쎄퀎 ?뺤옣 {FUNCTION_LABELS['6']}", func_expand),
+    "7": (f"寃쎄퀎 異뺤냼 {FUNCTION_LABELS['7']}", func_trim_boundary),
+    "8": (f"寃쎄퀎 怨꾨떒 硫붽퓞 {FUNCTION_LABELS['8']}", func_fill_staircase),
+    "9": (f"?뚯텧遺 ?쒓굅 {FUNCTION_LABELS['9']}", func_remove_protrusion),
+    "10": (f"?대? 援щ찉 梨꾩슦湲?{FUNCTION_LABELS['10']}", func_fill_holes),
+    "11": (f"怨좊┰ ?좎옣?믪쥌???щ씪踰⑤쭅 {FUNCTION_LABELS['11']}", func_relabel_isolated_kidney),
+    "12": (f"蹂쇰줉 猿띿쭏 ?쇰꺼留?{FUNCTION_LABELS['12']}", func_label_convex),
+    "13": (f"?멸렇硫섑뀒?댁뀡 ?⑹튂湲?{FUNCTION_LABELS['13']}", func_merge_segmentations),
+    "14": (f"由ъ깦?뚮쭅 ?⑹튂湲?{FUNCTION_LABELS['14']}", func_merge_resample),
+    "15": (f"Phase 鍮꾧탳 遺꾩꽍 {FUNCTION_LABELS['15']}", None),
+    "m": (f"?곸뿭 吏???ㅽ뻾 {FUNCTION_LABELS['m']}", None),
+    "r": (f"濡ㅻ갚 {FUNCTION_LABELS['r']}", None),
+}
 
 
 if __name__ == "__main__":
