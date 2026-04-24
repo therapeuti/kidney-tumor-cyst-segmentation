@@ -254,26 +254,9 @@ export function PostprocessPanel() {
           ))}
         </select>
       </label>
-      {selectedDefinition?.params.map((param) => (
-        <label key={param.key} style={styles.block}>
-          <span>{param.label}</span>
-          {param.type === "select" ? (
-            <select
-              value={String(params[param.key] ?? "")}
-              onChange={(event) =>
-                setParams((current) => ({
-                  ...current,
-                  [param.key]: event.target.value,
-                }))
-              }
-            >
-              {param.options.map((option) => (
-                <option key={String(option.value)} value={String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          ) : param.type === "boolean" ? (
+      {selectedDefinition?.params.map((param) =>
+        param.type === "boolean" ? (
+          <label key={param.key} style={styles.checkRow}>
             <input
               type="checkbox"
               checked={Boolean(params[param.key] ?? param.default)}
@@ -284,20 +267,42 @@ export function PostprocessPanel() {
                 }))
               }
             />
-          ) : (
-            <input
-              type="number"
-              value={Number(params[param.key] ?? 0)}
-              onChange={(event) =>
-                setParams((current) => ({
-                  ...current,
-                  [param.key]: Number(event.target.value),
-                }))
-              }
-            />
-          )}
-        </label>
-      ))}
+            <span>{param.label}</span>
+          </label>
+        ) : (
+          <label key={param.key} style={styles.block}>
+            <span>{param.label}</span>
+            {param.type === "select" ? (
+              <select
+                value={String(params[param.key] ?? "")}
+                onChange={(event) =>
+                  setParams((current) => ({
+                    ...current,
+                    [param.key]: event.target.value,
+                  }))
+                }
+              >
+                {param.options.map((option) => (
+                  <option key={String(option.value)} value={String(option.value)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                value={Number(params[param.key] ?? 0)}
+                onChange={(event) =>
+                  setParams((current) => ({
+                    ...current,
+                    [param.key]: Number(event.target.value),
+                  }))
+                }
+              />
+            )}
+          </label>
+        )
+      )}
 
       {/* Region restriction controls */}
       <div style={styles.regionSection}>
@@ -444,8 +449,23 @@ export function PostprocessPanel() {
 
       <div style={styles.actions}>
         <button style={styles.button} disabled={!activeSessionId || isLoading} onClick={() => void handlePreview()}>
-          {isLoading && isPreview ? "..." : "Preview"}
+          {isLoading && !isPreview ? "..." : "Preview"}
         </button>
+        {isPreview && (
+          <button
+            style={styles.button}
+            disabled={isLoading}
+            onClick={() => {
+              clearPreviewMask();
+              setIsPreview(false);
+              setSummaryData(null);
+              setChangedVoxels(null);
+              setStatus("Preview cancelled");
+            }}
+          >
+            Cancel
+          </button>
+        )}
         <button style={styles.button} disabled={!activeSessionId || isLoading} onClick={() => void handleApply()}>
           {isLoading && !isPreview ? "..." : "Apply"}
         </button>

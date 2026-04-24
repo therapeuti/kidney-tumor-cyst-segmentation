@@ -66,7 +66,7 @@ class ExpandParams:
     threshold: float | None = None
     tolerance: float | None = None
     iterations: int = 5
-    overwrite_kidney: bool = True
+    overwrite_kidney: bool = False
 
 
 @dataclass(frozen=True)

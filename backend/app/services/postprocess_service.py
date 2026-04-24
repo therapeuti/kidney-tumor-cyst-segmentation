@@ -150,7 +150,7 @@ FUNCTION_REGISTRY: dict[str, PostprocessFunctionDefinition] = {
             PostprocessParamDefinition(key="threshold", label="Threshold", type="number", default=120, required=False),
             PostprocessParamDefinition(key="tolerance", label="Tolerance", type="number", default=25, required=False),
             PostprocessParamDefinition(key="iterations", label="Iterations", type="number", default=5),
-            PostprocessParamDefinition(key="overwrite_kidney", label="Overwrite kidney", type="boolean", default=True),
+            PostprocessParamDefinition(key="overwrite_kidney", label="Overwrite kidney", type="boolean", default=False),
         ],
     ),
     "trim_boundary": PostprocessFunctionDefinition(
@@ -350,7 +350,7 @@ class PostprocessService:
                     threshold=None if params.get("threshold") in (None, "") else float(params.get("threshold")),
                     tolerance=None if params.get("tolerance") in (None, "") else float(params.get("tolerance")),
                     iterations=int(params.get("iterations", 5)),
-                    overwrite_kidney=bool(params.get("overwrite_kidney", True)),
+                    overwrite_kidney=params.get("overwrite_kidney", False) in (True, "true", "True", 1),
                 ),
             )
         if fn == "trim_boundary":

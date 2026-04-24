@@ -68,7 +68,7 @@ export type PostprocessFunctionDefinition = {
     label: string;
     type: string;
     required: boolean;
-    default: string | number | null;
+    default: string | number | boolean | null;
     options: Array<{
       label: string;
       value: string | number;
