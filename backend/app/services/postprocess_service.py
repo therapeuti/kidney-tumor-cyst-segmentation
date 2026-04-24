@@ -247,6 +247,9 @@ class PostprocessService:
             session.preview_mask = diff_map
         else:
             session.preview_mask = None
+        # Cache result for apply
+        session._postprocess_preview_result = result
+        session._postprocess_preview_summary = summary
         return PostprocessPreviewResponse(
             ok=True,
             changedVoxels=changed,
@@ -257,12 +260,18 @@ class PostprocessService:
         )
 
     def apply(self, session, payload: PostprocessRequest) -> PostprocessApplyResponse:
-        result, summary = self._run(session, payload, apply_changes=True)
+        # Reuse cached preview result if available
+        result = getattr(session, "_postprocess_preview_result", None)
+        summary = getattr(session, "_postprocess_preview_summary", None)
+        if result is None:
+            result, summary = self._run(session, payload, apply_changes=True)
         changed = int((result != session.seg_data).sum())
         if changed > 0:
             session_service.push_snapshot(session)
             session.seg_data = result
         session.preview_mask = None
+        session._postprocess_preview_result = None
+        session._postprocess_preview_summary = None
         return PostprocessApplyResponse(
             ok=True,
             changedVoxels=changed,

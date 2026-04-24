@@ -1,95 +1,70 @@
-name: Bug report
-description: Report a bug or regression in the CLI, backend, frontend, or docs.
-title: "[Bug] "
+name: "bug_report"
+description: "버그나 회귀 이슈를 작성하는 템플릿입니다."
+title: "bug: "
 labels:
   - bug
+assignees: []
+
 body:
-  - type: markdown
+  - type: textarea
+    id: bug_summary
     attributes:
-      value: |
-        Thanks for reporting a bug.
-        Please include enough detail for us to reproduce the issue quickly.
-
-  - type: dropdown
-    id: area
-    attributes:
-      label: Area
-      description: Where did the issue happen?
-      options:
-        - CLI (segtools.py)
-        - Core processing (segtools_core.py)
-        - Backend API
-        - Frontend UI
-        - Tests
-        - Documentation
-        - Other
+      label: "버그 설명"
+      description: "발생한 문제를 간단히 설명해주세요."
+      placeholder: "예: 웹 UI에서 postprocess 적용 후 Save를 누르면 500 에러가 발생한다."
     validations:
       required: true
 
   - type: textarea
-    id: summary
+    id: reproduce_steps
     attributes:
-      label: Summary
-      description: A short description of the bug.
-      placeholder: Example: Saving a session fails after postprocess apply in the web UI.
-    validations:
-      required: true
-
-  - type: textarea
-    id: steps
-    attributes:
-      label: Steps to reproduce
-      description: List the exact steps needed to reproduce the problem.
+      label: "재현 방법"
+      description: "버그를 재현하는 순서를 작성해주세요."
       placeholder: |
-        1. Start backend with `uvicorn backend.app.main:app --reload --port 8000`
-        2. Start frontend with `npm run dev`
-        3. Open S003 case and select phase A
-        4. Apply Remove Isolated with default settings
-        5. Click Save
+        예:
+        1. backend 실행
+        2. frontend 실행
+        3. S003 case 선택
+        4. 특정 기능 실행
+        5. 에러 발생 확인
     validations:
       required: true
 
   - type: textarea
-    id: expected
+    id: expected_behavior
     attributes:
-      label: Expected behavior
-      placeholder: The session should save successfully and remain editable.
+      label: "기대 동작"
+      description: "원래 어떻게 동작해야 하는지 작성해주세요."
+      placeholder: "예: 저장이 정상적으로 완료되어야 한다."
     validations:
       required: true
 
   - type: textarea
-    id: actual
+    id: actual_behavior
     attributes:
-      label: Actual behavior
-      placeholder: The save request returns 500 and the UI shows an error toast.
+      label: "실제 동작"
+      description: "실제로 어떤 문제가 발생했는지 작성해주세요."
+      placeholder: "예: 500 응답이 반환되고 저장이 되지 않는다."
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: Error message or logs
-      description: Paste stack traces, API responses, console logs, or screenshots if available.
-      render: shell
+      label: "로그 / 에러 메시지"
+      description: "콘솔 로그, 서버 로그, 스크린샷 등이 있으면 첨부해주세요."
+      placeholder: "예: Traceback 또는 브라우저 콘솔 에러"
 
   - type: textarea
     id: environment
     attributes:
-      label: Environment
-      description: Share the environment details relevant to the bug.
+      label: "환경 정보"
+      description: "문제를 재현한 환경 정보를 작성해주세요."
       placeholder: |
+        예:
         - OS:
-        - Python version:
-        - Node version:
+        - Python:
+        - Node:
         - Browser:
-        - Case data used:
-        - Commit / branch:
-    validations:
-      required: true
-
-  - type: textarea
-    id: notes
-    attributes:
-      label: Additional context
-      description: Anything else that might help, including whether this is a regression.
-
+        - Case data:
+        - Branch / commit:
