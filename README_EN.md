@@ -7,17 +7,27 @@ Post-processing tool for kidney + tumor + cyst segmentation labels.
 ## Folder Structure
 
 ```
-segmentation/
-├── S003/
-│   ├── S003_Segmentation_A.nii.gz    # Segmentation (A phase)
-│   ├── S003_image_A.nii.gz           # CT image (A phase)
-│   └── backup_original/              # Original backup (auto-created)
-├── S004/
-│   ├── S004_segmentation_A.nii.gz
-│   ├── S004_image_A.nii.gz
-│   └── ...
-└── segtools.py
+kidney-tumor-cyst-segmentation/
+├── S003/                            # Example case data
+│   ├── S003_Segmentation_A.nii.gz   # Segmentation (A phase)
+│   ├── S003_image_A.nii.gz          # CT image (A phase)
+│   └── backup_original/             # Original backup (auto-created)
+├── backend/                         # FastAPI backend
+│   ├── app/
+│   └── requirements.txt
+├── frontend/                        # React + Vite frontend
+│   ├── src/
+│   └── package.json
+├── tests/                           # pytest-based tests
+├── docs/                            # design and refactor docs
+│   └── legacy/                      # archived standalone scripts
+├── segtools.py                      # legacy CLI entrypoint
+├── segtools_core.py                 # shared post-processing logic
+└── README.md
 ```
+
+- Case folders such as `S003` and `S015` are expected to live at the project root.
+- The web UI adds `backend/` and `frontend/`, while the original CLI remains available through `segtools.py`.
 
 ### Label Definitions
 
@@ -469,8 +479,86 @@ Enter `r` at the function selection menu or immediately after execution to rollb
 
 ---
 
+## Running the Web UI (Frontend + Backend)
+
+In addition to the CLI, the project now includes a browser-based viewer and editing UI.
+
+### Setup
+
+```bash
+# Backend dependencies
+cd backend
+pip install -r requirements.txt
+
+# Frontend dependencies
+cd ../frontend
+npm install
+```
+
+### Run
+
+Open two terminals and run them separately.
+
+**Terminal 1 — Backend (FastAPI, port 8000)**
+
+```bash
+# Run from the project root
+uvicorn backend.app.main:app --reload --port 8000
+```
+
+Health check:
+
+```bash
+http://127.0.0.1:8000/health
+```
+
+**Terminal 2 — Frontend (Vite, port 5173)**
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open **http://localhost:5173** in your browser.
+
+> The frontend dev server automatically proxies `/api` requests to the backend on port 8000.
+
+### Web UI Workflow
+
+1. Select a **case** (such as `S003`) in the left panel, then choose a phase tab.
+2. Use the **Viewer** to inspect CT slices with segmentation overlays.
+3. Use **Manual Edit** tools such as brush or polygon for direct label editing.
+4. Use **Postprocess** to preview and apply processing functions with parameters.
+5. Use **Undo/Redo** from the history panel.
+6. Use **Save** to persist the session with automatic original backup.
+
+### Running Tests
+
+```bash
+# Run from the project root
+python -m pytest tests/ -v
+```
+
+- `tests/test_integration_backend.py` runs real backend integration tests only when `S003/` sample data is present.
+- If sample data is missing, some tests will be skipped.
+
+---
+
 ## Dependencies
 
 ```bash
 pip install nibabel numpy scipy
+```
+
+### Backend
+
+```bash
+pip install -r backend/requirements.txt
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
 ```

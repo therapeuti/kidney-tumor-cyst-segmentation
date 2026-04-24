@@ -7,17 +7,26 @@
 ## 폴더 구조
 
 ```
-segmentation/
-├── S003/
-│   ├── S003_Segmentation_A.nii.gz    # 세그멘테이션 (A phase)
-│   ├── S003_image_A.nii.gz           # CT 이미지 (A phase)
-│   └── backup_original/              # 원본 백업 (자동 생성)
-├── S004/
-│   ├── S004_segmentation_A.nii.gz
-│   ├── S004_image_A.nii.gz
-│   └── ...
-└── segtools.py
+kidney-tumor-cyst-segmentation/
+├── S003/                            # 케이스 데이터 예시
+│   ├── S003_Segmentation_A.nii.gz   # 세그멘테이션 (A phase)
+│   ├── S003_image_A.nii.gz          # CT 이미지 (A phase)
+│   └── backup_original/             # 원본 백업 (자동 생성)
+├── backend/                         # FastAPI 백엔드
+│   ├── app/
+│   └── requirements.txt
+├── frontend/                        # React + Vite 프론트엔드
+│   ├── src/
+│   └── package.json
+├── tests/                           # pytest 기반 테스트
+├── docs/                            # 설계/리팩토링 문서
+├── segtools.py                      # 기존 CLI 진입점
+├── segtools_core.py                 # 후처리 공통 로직
+└── README_EN.md
 ```
+
+- 케이스 폴더(`S003`, `S015` 등)는 프로젝트 루트 아래에 위치한다고 가정합니다.
+- 웹 UI는 `backend/`와 `frontend/`를 추가한 구조이고, 기존 CLI는 `segtools.py`로 그대로 사용할 수 있습니다.
 
 ### 라벨 정의
 
@@ -500,6 +509,12 @@ npm install
 uvicorn backend.app.main:app --reload --port 8000
 ```
 
+헬스체크:
+
+```bash
+http://127.0.0.1:8000/health
+```
+
 **터미널 2 — 프론트엔드 (Vite, 포트 5173)**
 
 ```bash
@@ -527,6 +542,9 @@ npm run dev
 # 프로젝트 루트에서 실행
 python -m pytest tests/ -v
 ```
+
+- `tests/test_integration_backend.py`는 `S003/` 샘플 데이터가 있을 때만 실제 API 통합 테스트를 수행합니다.
+- 데이터가 없으면 일부 테스트는 skip될 수 있습니다.
 
 ---
 
