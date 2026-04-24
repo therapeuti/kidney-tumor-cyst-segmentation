@@ -1,0 +1,87 @@
+name: "project_review"
+description: "프로젝트를 직접 사용해보며 점검한 내용, 수정 포인트, 추가 아이디어를 정리하는 템플릿입니다."
+title: "review: "
+labels: []
+assignees: []
+
+body:
+  - type: textarea
+    id: review_goal
+    attributes:
+      label: "점검 목적"
+      description: "이번 점검에서 무엇을 확인하려는지 작성해주세요."
+      placeholder: "예: 웹 UI와 CLI를 실제로 사용해보면서 현재 동작 상태와 개선 포인트를 정리한다."
+    validations:
+      required: true
+
+  - type: textarea
+    id: review_scope
+    attributes:
+      label: "점검 범위"
+      description: "어떤 영역을 확인했는지 작성해주세요."
+      placeholder: |
+        예:
+        - CLI
+        - backend API
+        - frontend UI
+        - README / 문서
+        - 테스트
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_worked
+    attributes:
+      label: "잘 되고 있는 점"
+      description: "직접 사용해보며 문제 없이 동작했던 부분을 정리해주세요."
+      placeholder: |
+        예:
+        - case/phase 로딩은 정상 동작함
+        - postprocess apply 흐름은 자연스러움
+
+  - type: textarea
+    id: issues_found
+    attributes:
+      label: "수정이 필요한 점"
+      description: "버그, 어색한 UX, 문서 불일치 등 수정이 필요한 내용을 작성해주세요."
+      placeholder: |
+        예:
+        - 특정 버튼의 문구가 모호함
+        - 저장 후 성공 메시지가 부족함
+        - README 실행 설명과 실제 동작이 일부 다름
+
+  - type: textarea
+    id: feature_ideas
+    attributes:
+      label: "추가하면 좋은 기능"
+      description: "점검하면서 떠오른 기능 아이디어를 작성해주세요."
+      placeholder: |
+        예:
+        - 자주 쓰는 파라미터 preset 저장
+        - 작업 전후 결과 비교 기능
+        - 최근 작업 이력 빠른 복원
+
+  - type: textarea
+    id: follow_up_tasks
+    attributes:
+      label: "후속 작업 후보"
+      description: "나중에 개별 이슈로 분리할 만한 작업이 있으면 적어주세요."
+      placeholder: |
+        예:
+        1. Save UX 개선
+        2. README 보강
+        3. postprocess 옵션 설명 개선
+
+  - type: textarea
+    id: test_context
+    attributes:
+      label: "테스트/사용 환경"
+      description: "어떤 환경에서 점검했는지 작성해주세요."
+      placeholder: |
+        예:
+        - OS:
+        - Python:
+        - Node:
+        - Browser:
+        - Case data:
+        - Branch / commit:
