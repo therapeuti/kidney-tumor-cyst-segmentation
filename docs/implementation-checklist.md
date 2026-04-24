@@ -274,6 +274,18 @@ Goal: move beyond MVP into a stronger annotation workflow.
 - [ ] Add seed-based convex hull workflow UI
 - [x] Add richer operation history/log panel
 
+## Phase 9. Improvements
+
+### Convex Hull 둥근 곡선 연결
+
+현재 ConvexHull은 꼭짓점을 직선(2D) / 평면(3D)으로 연결하여 각진 형태가 됨.
+자연스러운 형태를 위해 둥근 곡선으로 개선 필요.
+
+- [ ] 2D convex hull: 슬라이스 내 hull 외곽을 smoothing 처리 (morphological closing 또는 gaussian smoothing)
+- [ ] 3D convex hull: 다면체 표면을 smoothing 처리
+- [ ] 슬라이스 간 보간을 둥근 형태로 개선 (선형 보간 → smoothing 적용)
+- [ ] 둥근 정도를 조절하는 파라미터 추가 (UI 포함)
+
 ## Rules for Updating This Checklist
 
 - Check items only when code or docs are actually added and verified.

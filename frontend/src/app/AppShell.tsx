@@ -34,7 +34,12 @@ export function AppShell() {
   const overlayOpacity = useViewerStore((state) => state.overlayOpacity);
   const setOverlayOpacity = useViewerStore((state) => state.setOverlayOpacity);
   const prevOpacityRef = useRef(0.55);
+  const leftSidebarRef = useRef<HTMLElement>(null);
   const isOverlayVisible = overlayOpacity > 0;
+
+  useEffect(() => {
+    leftSidebarRef.current?.scrollTo(0, 0);
+  }, [activeSessionId]);
 
   function handleToggleOverlay() {
     if (isOverlayVisible) {
@@ -81,7 +86,7 @@ export function AppShell() {
         </div>
       </header>
       <div style={styles.body}>
-        <aside style={styles.leftSidebar}>
+        <aside ref={leftSidebarRef} style={styles.leftSidebar}>
           <CaseBrowser />
           <PhaseTabs />
           <LabelPanel />
